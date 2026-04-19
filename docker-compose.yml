@@ -1,0 +1,26 @@
+services:
+  rbn-smeter:
+    build: .
+    container_name: rbn-smeter
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}
+      - EMAIL=${EMAIL}
+      - SKIP_CERTBOT=${SKIP_CERTBOT:-false}
+      - STRENGTH_DOMAIN=rbnstrength.rm.gl
+    volumes:
+      - certs:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    networks:
+      - rbn-net
+
+volumes:
+  certs:
+  certbot-www:
+
+networks:
+  rbn-net:
+    external: true

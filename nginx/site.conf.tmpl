@@ -1,0 +1,78 @@
+# ── HTTP — redirect to HTTPS + ACME challenge ─────────────────────────────────
+server {
+    listen 80;
+    server_name __DOMAIN__;
+
+    # Let's Encrypt ACME challenge
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ── HTTPS ─────────────────────────────────────────────────────────────────────
+server {
+    listen 443 ssl http2;
+    server_name __DOMAIN__;
+
+    ssl_certificate     /etc/letsencrypt/live/__DOMAIN__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__DOMAIN__/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    ssl_session_cache   shared:SSL:10m;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header Service-Worker-Allowed "/";
+
+    root  /usr/share/nginx/html;
+    index index.html;
+
+    # ── Node proxy routes ────────────────────────────────────────────────────
+    location /rbn {
+        proxy_pass         http://127.0.0.1:3001/rbn;
+        proxy_http_version 1.1;
+        proxy_read_timeout 15s;
+        proxy_connect_timeout 5s;
+    }
+
+    location /hamdb/ {
+        proxy_pass         http://127.0.0.1:3001/hamdb/;
+        proxy_http_version 1.1;
+        proxy_read_timeout 10s;
+        proxy_connect_timeout 5s;
+    }
+
+    location /solar {
+        proxy_pass         http://127.0.0.1:3001/solar;
+        proxy_http_version 1.1;
+        proxy_read_timeout 20s;
+        proxy_connect_timeout 5s;
+    }
+
+    location /health {
+        proxy_pass http://127.0.0.1:3001/health;
+        proxy_http_version 1.1;
+    }
+
+    # ── Service worker + app shell — never HTTP-cached ──────────────────────
+    location ~* ^/(sw\.js|app\.js|style\.css|index\.html|manifest\.json)$ {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Service-Worker-Allowed "/";
+    }
+
+    # ── Other static assets (icons etc.) ────────────────────────────────────
+    location ~* \.(png|ico|webp)$ {
+        expires 7d;
+        add_header Cache-Control "public, max-age=604800";
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+    }
+
+    location ~ /\. { deny all; }
+}

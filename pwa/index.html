@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0d0d1a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="RBN S-Meter">
+  <meta name="description" content="Real-time HF propagation from the Reverse Beacon Network">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+  <title>RBN S-Meter</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header>
+    <div class="header-inner">
+      <div class="title-block">
+        <h1>RBN S‑METER</h1>
+        <p class="subtitle">REVERSE BEACON NETWORK SIGNAL LEVELS</p>
+      </div>
+      <div class="byline">by Gerry, W1VE</div>
+    </div>
+  </header>
+
+  <div class="controls">
+    <div class="vantage-row">
+      <span class="ctrl-label">Vantage:</span>
+
+      <label class="radio-label">
+        <input type="radio" name="vantage-mode" value="region" checked id="rb-region">
+        <span>Region</span>
+      </label>
+
+      <select id="region-select" class="ctrl-select">
+        <option value="0">E. North America</option>
+        <option value="1">C. North America</option>
+        <option value="2">W. North America</option>
+        <option value="3">South America</option>
+        <option value="4">Europe</option>
+        <option value="5">Africa</option>
+        <option value="6">Asia</option>
+        <option value="7">Oceania</option>
+      </select>
+
+      <label class="radio-label">
+        <input type="radio" name="vantage-mode" value="grid" id="rb-grid">
+        <span>Grid</span>
+      </label>
+
+      <input type="text" id="grid-input" class="ctrl-input" placeholder="FN42"
+             maxlength="6" disabled autocomplete="off" autocorrect="off"
+             autocapitalize="characters" spellcheck="false">
+
+      <select id="radius-select" class="ctrl-select" disabled>
+        <option value="250">250 mi</option>
+        <option value="500" selected>500 mi</option>
+        <option value="1000">1000 mi</option>
+        <option value="1500">1500 mi</option>
+        <option value="2000">2000 mi</option>
+        <option value="5000">5000 mi</option>
+      </select>
+
+      <button id="unit-toggle" class="unit-toggle" disabled>mi</button>
+    </div>
+
+    <div class="btn-sw-row">
+      <div class="btn-row">
+        <button id="btn-start" class="btn btn-start">▶ Start</button>
+        <button id="btn-stop"  class="btn btn-stop"  disabled>■ Stop</button>
+        <button id="btn-reset" class="btn btn-reset">↺ Reset</button>
+      </div>
+      <div id="sw-bar">
+        <div class="sw-item"><span class="sw-lbl">SFI</span><span class="sw-val" id="sw-sfi">—</span></div>
+        <div class="sw-item"><span class="sw-lbl">SSN</span><span class="sw-val" id="sw-ssn">—</span></div>
+        <div class="sw-item"><span class="sw-lbl">A-Index</span><span class="sw-val" id="sw-a">—</span></div>
+        <div class="sw-item"><span class="sw-lbl">K-Index</span><span class="sw-val" id="sw-k">—</span></div>
+        <div class="sw-item"><span class="sw-lbl">Solar Wind</span><span class="sw-val" id="sw-wind">—</span></div>
+        <div class="sw-item"><span class="sw-lbl">Bz</span><span class="sw-val" id="sw-bz">—</span></div>
+        <div class="sw-item"><span class="sw-lbl">UTC</span><span class="sw-val sw-utc" id="sw-utc">00:00:00</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="meters-scroll">
+    <div class="meters-grid" id="meters-grid">
+      <!-- Region panels injected by JS (desktop/tablet) -->
+    </div>
+  </div>
+
+  <div class="phone-accordion" id="phone-accordion">
+    <!-- Accordion rows injected by JS (phone only) -->
+  </div>
+
+  <footer id="status-bar">
+    Press Start to begin polling.
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

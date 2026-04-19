@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker exec *)",
+      "Bash(curl -s --max-time 5 \"https://services.swpc.noaa.gov/text/wwv.txt\")",
+      "Bash(curl -s --max-time 5 \"https://services.swpc.noaa.gov/products/solar-wind/plasma-1-minute.json\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('header:', d[0]\\); print\\('last:', d[-1]\\)\")",
+      "Bash(curl -s --max-time 5 \"https://services.swpc.noaa.gov/products/solar-wind/mag-1-minute.json\")",
+      "Bash(curl -s --max-time 5 \"https://services.swpc.noaa.gov/json/solar-cycle/observed-solar-cycle-indices.json\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('last entry:', d[-1]\\)\")",
+      "WebSearch",
+      "WebFetch(domain:g7vrd.co.uk)"
+    ]
+  }
+}
