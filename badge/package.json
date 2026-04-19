@@ -1,0 +1,12 @@
+{
+  "name": "rbn-badge",
+  "version": "1.0.0",
+  "description": "RBN S-Meter embeddable badge image API",
+  "main": "badge.js",
+  "scripts": {
+    "start": "node badge.js"
+  },
+  "dependencies": {
+    "canvas": "^2.11.2"
+  }
+}

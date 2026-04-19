@@ -16,6 +16,21 @@ services:
       - certbot-www:/var/www/certbot
     networks:
       - rbn-net
+    depends_on:
+      - rbn-badge
+
+  rbn-badge:
+    build:
+      context: ./badge
+      dockerfile: Dockerfile
+    container_name: rbn-badge
+    restart: unless-stopped
+    expose:
+      - "3002"
+    environment:
+      - PORT=3002
+    networks:
+      - rbn-net
 
 volumes:
   certs:

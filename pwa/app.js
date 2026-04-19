@@ -16,8 +16,11 @@ const BANDS = [
   { label: '160m', min: 1800,  max: 2000  },
   { label: '80m',  min: 3500,  max: 4000  },
   { label: '40m',  min: 7000,  max: 7300  },
+  { label: '30m',  min: 10100, max: 10150 },  // WARC
   { label: '20m',  min: 14000, max: 14350 },
+  { label: '17m',  min: 18068, max: 18168 },  // WARC
   { label: '15m',  min: 21000, max: 21450 },
+  { label: '12m',  min: 24890, max: 24990 },  // WARC
   { label: '10m',  min: 28000, max: 29700 },
   { label: '6m',   min: 50000, max: 54000 },
 ];
@@ -27,11 +30,11 @@ const EMA_ALPHA  = 0.08;
 const POLL_MS    = 15000;
 const SEG_COUNT  = 15;
 
-// Proxy base — routes /rbn and /hamdb/:call to upstream APIs
-// Change this if you deploy to a different domain/port.
+const SSB_SNR_THRESHOLD = 20.0;  // min median SNR (dB) for SSB to be considered workable
+const KNOWN_MODES = ['CW', 'RTTY', 'FT8', 'FT4'];
+
 const PROXY_BASE = '';   // empty = same origin as the PWA
 
-// Segment colour ramp (matches Windows app)
 const SEG_COLORS = {
   live: ['#00d250','#00d250','#00d250','#00d250','#00d250','#00d250','#00d250','#00d250','#00d250',
          '#e6c800','#e6c800','#e6c800','#ff8c00','#dc1e1e','#dc1e1e'],
@@ -39,10 +42,21 @@ const SEG_COLORS = {
          '#645500','#645500','#645500','#723c00','#641212','#641212'],
 };
 
+// ── Mode normalisation ────────────────────────────────────────────────────────
+function normaliseMode(raw) {
+  const u = (raw || '').toUpperCase();
+  if (u === 'CW')   return 'CW';
+  if (u === 'RTTY') return 'RTTY';
+  if (u === 'FT8')  return 'FT8';
+  if (u === 'FT4')  return 'FT4';
+  if (u.startsWith('PSK')) return 'PSK';
+  return u;
+}
+
 // ── Settings persistence ──────────────────────────────────────────────────────
 const Settings = {
   KEY: 'rbn_smeter_settings',
-  defaults: { mode: 'region', regionIndex: 0, grid: '', radiusIndex: 1, unit: 'auto' },
+  defaults: { mode: 'region', regionIndex: 0, grid: '', radiusIndex: 2, unit: 'auto', autoUpdate: false },
   load() {
     try { return { ...this.defaults, ...JSON.parse(localStorage.getItem(this.KEY) || '{}') }; }
     catch { return { ...this.defaults }; }
@@ -113,27 +127,21 @@ function snrToSUnit(snr) {
   return 'S9+30';
 }
 
-// ── Region classifier (mirrors CallsignClassifier.cs) ─────────────────────────
-// Returns 0-7 matching REGIONS array, or -1 for unknown
+// ── Region classifier ─────────────────────────────────────────────────────────
 const PREFIX_TABLE = [
-  // US Eastern 1,2,3,4,8,9
   ['W1',0],['W2',0],['W3',0],['W4',0],['W8',0],['W9',0],
   ['K1',0],['K2',0],['K3',0],['K4',0],['K8',0],['K9',0],
   ['N1',0],['N2',0],['N3',0],['N4',0],['N8',0],['N9',0],
   ['VE1',0],['VE2',0],['VE3',0],['VE9',0],['VA1',0],['VA2',0],['VA3',0],['VY2',0],
   ['KP2',0],['KP4',0],['WP4',0],['NP4',0],['VP9',0],['CO',0],['CM',0],['HH',0],['HI',0],
-  // US Central 0,5
   ['W0',1],['W5',1],['K0',1],['K5',1],['N0',1],['N5',1],
   ['VE4',1],['VE5',1],['VA4',1],['VA5',1],['XE',1],['XF',1],
   ['TI',1],['YN',1],['HR',1],['TG',1],['YS',1],
-  // US Western 6,7
   ['W6',2],['W7',2],['K6',2],['K7',2],['N6',2],['N7',2],
   ['VE6',2],['VE7',2],['VA6',2],['VA7',2],['VY1',2],
   ['KH6',2],['NH6',2],['WH6',2],['KL',2],['WL',2],['NL',2],['AL',2],
-  // South America
   ['PY',3],['PP',3],['LU',3],['CE',3],['OA',3],['HC',3],['HK',3],
   ['YV',3],['YW',3],['CX',3],['ZP',3],['CP',3],['GY',3],['PZ',3],['FY',3],['VP8',3],
-  // Europe
   ['G',4],['M',4],['GM',4],['GW',4],['GI',4],['GD',4],['GJ',4],['GU',4],
   ['F',4],['DL',4],['DJ',4],['DK',4],['OE',4],['PA',4],['ON',4],
   ['SM',4],['SA',4],['OH',4],['LA',4],['OZ',4],['TF',4],['EI',4],
@@ -142,18 +150,15 @@ const PREFIX_TABLE = [
   ['YO',4],['LZ',4],['SV',4],['TA',4],['UR',4],['EU',4],['EW',4],
   ['RA',4],['RU',4],['UA1',4],['UA2',4],['UA3',4],['UA4',4],['UA6',4],
   ['YU',4],['9A',4],['S5',4],['Z3',4],['E7',4],['YL',4],['LY',4],['ES',4],['ER',4],
-  // Africa
   ['ZS',5],['ZT',5],['ZU',5],['EA8',5],['EA9',5],['CN',5],['7X',5],['TS',5],
   ['SU',5],['SS',5],['ST',5],['ET',5],['5Z',5],['5X',5],['9J',5],['9I',5],
   ['V5',5],['7P',5],['7Q',5],['C9',5],['D2',5],['TY',5],['TZ',5],['5U',5],
   ['9G',5],['9L',5],['TU',5],['TR',5],['TN',5],['9Q',5],['5B',5],
-  // Asia
   ['JA',6],['JH',6],['JK',6],['JR',6],['HL',6],['DS',6],
   ['BY',6],['BG',6],['BT',6],['BV',6],['VR',6],
   ['UA9',6],['UA0',6],['R9',6],['R0',6],
   ['4X',6],['4Z',6],['9K',6],['HZ',6],['A6',6],['A4',6],['A7',6],
   ['AP',6],['VU',6],['AT',6],['9M',6],['HS',6],['XV',6],['YB',6],['PK',6],
-  // Oceania
   ['VK',7],['ZL',7],['ZM',7],['DU',7],['DV',7],['DW',7],['DX',7],
   ['YJ',7],['3D2',7],['FO',7],['FK',7],['A3',7],['E5',7],['P2',7],['H4',7],
   ['KH8',7],['5W',7],['V6',7],['V7',7],['T8',7],
@@ -164,20 +169,17 @@ function classifyCallsign(call) {
   let c = call.toUpperCase();
   const slash = c.indexOf('/');
   if (slash > 0) c = c.slice(0, slash);
-
   for (const [pfx, region] of PREFIX_TABLE) {
     if (c.startsWith(pfx)) return region;
   }
-
-  // US fallback: W/K/N first char → find district digit
   const c0 = c[0];
   if (c0 === 'W' || c0 === 'K' || c0 === 'N') {
     for (const ch of c) {
       if (ch >= '0' && ch <= '9') {
         const d = parseInt(ch);
-        if (d === 0 || d === 5) return 1; // Central
-        if (d === 6 || d === 7) return 2; // Western
-        return 0; // Eastern
+        if (d === 0 || d === 5) return 1;
+        if (d === 6 || d === 7) return 2;
+        return 0;
       }
     }
   }
@@ -198,14 +200,14 @@ function regionFromLatLon(lat, lon) {
   return 0;
 }
 
-// ── Spotter location cache (sessionStorage — no SQLite in browser) ─────────────
+// ── Spotter cache ─────────────────────────────────────────────────────────────
 const SpotterCache = {
   get(call) {
     try {
       const v = sessionStorage.getItem('sc_' + call);
-      if (v === null) return null;        // never seen
-      if (v === '')   return false;       // cached as unresolvable
-      return JSON.parse(v);              // { lat, lon }
+      if (v === null) return null;
+      if (v === '')   return false;
+      return JSON.parse(v);
     } catch { return null; }
   },
   put(call, latLon) {
@@ -214,9 +216,7 @@ const SpotterCache = {
   },
 };
 
-// ── Country centroids (subset — browser port doesn't need all 340) ────────────
-// Full table would be huge; we include ~120 key DXCC prefixes.
-// For a full deployment, expand from CountryCentroids.cs.
+// ── Country centroids ─────────────────────────────────────────────────────────
 const CENTROIDS = [
   ['KH0',[15.18,145.75]],['KH2',[13.45,144.79]],['KH6',[20.8,-156.3]],
   ['KL',[64.2,-153]],['KP2',[17.73,-64.73]],['KP4',[18.22,-66.59]],
@@ -295,10 +295,9 @@ function centroidForCall(call) {
 async function resolveSpotter(call) {
   const upper = call.toUpperCase().split('/')[0];
   const cached = SpotterCache.get(upper);
-  if (cached === false) return null;   // known unresolvable
-  if (cached)           return cached; // known location
+  if (cached === false) return null;
+  if (cached)           return cached;
 
-  // US/CA → HamDB
   if (/^[WKN]/.test(upper) || upper.startsWith('VE') || upper.startsWith('VA')) {
     try {
       const resp = await fetch(`${PROXY_BASE}/hamdb/${upper}`);
@@ -319,24 +318,30 @@ async function resolveSpotter(call) {
     } catch {}
   }
 
-  // Country centroid fallback
   const ll = centroidForCall(upper);
   if (ll) { SpotterCache.put(upper, ll); return ll; }
-
-  SpotterCache.put(upper, null); // sentinel
+  SpotterCache.put(upper, null);
   return null;
 }
 
 // ── RegionMeter ───────────────────────────────────────────────────────────────
 class RegionMeter {
   constructor() { this.reset(); }
+
   reset() {
-    this.hasValue  = new Array(BANDS.length).fill(false);
-    this.ema       = new Array(BANDS.length).fill(0);
-    this.peak      = new Array(BANDS.length).fill(0);
-    this.spotCount = new Array(BANDS.length).fill(0);
+    this.hasValue     = new Array(BANDS.length).fill(false);
+    this.ema          = new Array(BANDS.length).fill(0);
+    this.peak         = new Array(BANDS.length).fill(0);
+    this.spotCount    = new Array(BANDS.length).fill(0);
+    this.currentModes = Array.from({length: BANDS.length}, () => new Set());
   }
-  addSample(bandIdx, snr) {
+
+  // Call at start of each poll cycle — clears mode sets, preserves EMA/peak
+  beginPollCycle() {
+    this.currentModes = Array.from({length: BANDS.length}, () => new Set());
+  }
+
+  addSample(bandIdx, snr, mode) {
     if (!this.hasValue[bandIdx]) {
       this.ema[bandIdx]      = snr;
       this.hasValue[bandIdx] = true;
@@ -346,8 +351,11 @@ class RegionMeter {
     if (this.ema[bandIdx] > this.peak[bandIdx])
       this.peak[bandIdx] = this.ema[bandIdx];
     this.spotCount[bandIdx]++;
+    const nm = normaliseMode(mode);
+    if (nm) this.currentModes[bandIdx].add(nm);
   }
-  // Called each poll cycle for bands that received no samples — drains stale readings
+
+  // Drain stale readings when a band receives no samples this poll
   decayBand(bandIdx) {
     if (!this.hasValue[bandIdx]) return;
     this.ema[bandIdx]  *= (1 - EMA_ALPHA);
@@ -358,8 +366,16 @@ class RegionMeter {
       this.hasValue[bandIdx] = false;
     }
   }
+
+  activeModes(bandIdx) {
+    const modes = new Set(this.currentModes[bandIdx]);
+    if (this.hasValue[bandIdx] && this.ema[bandIdx] >= SSB_SNR_THRESHOLD)
+      modes.add('SSB');
+    return modes;
+  }
+
   get totalSpots() { return this.spotCount.reduce((a,b) => a+b, 0); }
-  get hasAnyData() { return this.hasValue.some(Boolean); }
+  get hasAnyData()  { return this.hasValue.some(Boolean); }
 }
 
 // ── Canvas bar drawing ────────────────────────────────────────────────────────
@@ -367,54 +383,85 @@ function drawBar(canvas, hasData, snr, peak) {
   const ctx = canvas.getContext('2d');
   const w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
-
   const gapW   = 1;
   const segW   = (w - gapW * (SEG_COUNT - 1)) / SEG_COUNT;
   const liveN  = hasData ? Math.min(snr  / MAX_SNR, 1) : 0;
   const peakN  = Math.min(peak / MAX_SNR, 1);
   const litSeg = Math.round(liveN * SEG_COUNT);
   const pkSeg  = Math.round(peakN * SEG_COUNT);
-
   for (let i = 0; i < SEG_COUNT; i++) {
     const x    = i * (segW + gapW);
     const lit  = i < litSeg;
     const inPk = !lit && i < pkSeg;
-
     if (!hasData)   ctx.fillStyle = '#1c1c32';
     else if (lit)   ctx.fillStyle = SEG_COLORS.live[i];
     else if (inPk)  ctx.fillStyle = SEG_COLORS.peak[i];
     else            ctx.fillStyle = '#1c1c32';
-
     ctx.fillRect(x, 0, segW, h);
   }
 }
 
+// ── Mode row builder ──────────────────────────────────────────────────────────
+// Abbreviated labels to fit narrow panel columns
+const MODE_ABBREV = { CW: 'CW', RTTY: 'RY', FT8: 'FTx', FT4: 'FTx', SSB: 'SSB' };
+
+// Display slots: CW, RY (RTTY), FTx (FT8+FT4), SSB
+const DISPLAY_MODES = [
+  { abbr: 'CW',  sources: ['CW'],        isSSB: false },
+  { abbr: 'RY',  sources: ['RTTY'],      isSSB: false },
+  { abbr: 'FTx', sources: ['FT8','FT4'], isSSB: false },
+  { abbr: 'SSB', sources: ['SSB'],       isSSB: true  },
+];
+
+function buildModeRow(el, hasData, activeModes) {
+  el.innerHTML = '';
+  DISPLAY_MODES.forEach(({ abbr, sources, isSSB }) => {
+    const span   = document.createElement('span');
+    const active = sources.some(s => activeModes.has(s));
+    if (!hasData) {
+      span.className   = 'mode-label mode-dim';
+      span.textContent = abbr;
+    } else if (active && isSSB) {
+      span.className   = 'mode-label mode-ssb';
+      span.textContent = '\u2713' + abbr;
+    } else if (active) {
+      span.className   = 'mode-label mode-active';
+      span.textContent = '\u2713' + abbr;
+    } else if (isSSB) {
+      span.className   = 'mode-label mode-dim';
+      span.textContent = abbr;
+    } else {
+      span.className   = 'mode-label mode-absent';
+      span.textContent = '\u2717' + abbr;
+    }
+    el.appendChild(span);
+  });
+}
+
 // ── Phone detection ───────────────────────────────────────────────────────────
-// A "phone" is any viewport narrower than 600px at load time.
-// CSS handles the actual hiding/showing; JS builds the right DOM for each.
 function isPhone() { return window.innerWidth < 600; }
 
 // ── UI: meters state ──────────────────────────────────────────────────────────
-const meters  = REGIONS.map(() => new RegionMeter());
+const meters = REGIONS.map(() => new RegionMeter());
 
 // Desktop refs
-const canvases = []; // [regionIdx][bandIdx]
-const sUnits   = []; // [regionIdx][bandIdx]
-const footers  = []; // [regionIdx]
+const canvases     = []; // [regionIdx][bandIdx]
+const sUnits       = []; // [regionIdx][bandIdx]
+const footers      = []; // [regionIdx]
+const deskModeRows = []; // [regionIdx][bandIdx]
 
 // Phone refs
 const accCanvases = []; // [regionIdx][bandIdx]
 const accSUnits   = []; // [regionIdx][bandIdx]
 const accFooters  = []; // [regionIdx]
-const accPills    = []; // [regionIdx][bandIdx]  — collapsed summary pills
+const accPills    = []; // [regionIdx][bandIdx]
+const accModeRows = []; // [regionIdx][bandIdx]
 
 // ── Build desktop panels ──────────────────────────────────────────────────────
 function buildDesktopPanels() {
   const grid = document.getElementById('meters-grid');
   grid.innerHTML = '';
-  canvases.length = 0;
-  sUnits.length   = 0;
-  footers.length  = 0;
+  canvases.length = 0; sUnits.length = 0; footers.length = 0; deskModeRows.length = 0;
 
   REGIONS.forEach((name, ri) => {
     const panel = document.createElement('div');
@@ -426,9 +473,9 @@ function buildDesktopPanels() {
     panel.appendChild(hdr);
 
     const rows = document.createElement('div');
-    rows.className  = 'band-rows';
+    rows.className = 'band-rows';
 
-    const rc = [], rs = [];
+    const rc = [], rs = [], rmDesk = [];
     BANDS.forEach((band, bi) => {
       const row = document.createElement('div');
       row.className = 'band-row';
@@ -448,12 +495,19 @@ function buildDesktopPanels() {
       su.className   = 's-unit no-data';
       su.textContent = '--';
 
+      // Per-band mode indicator row
+      const bmr = document.createElement('div');
+      bmr.className = 'band-mode-row';
+      buildModeRow(bmr, false, new Set());
+
       row.appendChild(lbl);
       row.appendChild(wrap);
       row.appendChild(su);
       rows.appendChild(row);
+      rows.appendChild(bmr);
       rc.push(cv);
       rs.push(su);
+      rmDesk.push(bmr);
     });
 
     const ftr = document.createElement('div');
@@ -466,6 +520,7 @@ function buildDesktopPanels() {
     canvases.push(rc);
     sUnits.push(rs);
     footers.push(ftr);
+    deskModeRows.push(rmDesk);
   });
 
   requestAnimationFrame(() => {
@@ -481,16 +536,13 @@ function buildDesktopPanels() {
 function buildPhoneAccordion() {
   const acc = document.getElementById('phone-accordion');
   acc.innerHTML = '';
-  accCanvases.length = 0;
-  accSUnits.length   = 0;
-  accFooters.length  = 0;
-  accPills.length    = 0;
+  accCanvases.length = 0; accSUnits.length = 0; accFooters.length = 0;
+  accPills.length = 0;    accModeRows.length = 0;
 
   REGIONS.forEach((name, ri) => {
     const row = document.createElement('div');
     row.className = 'acc-row';
 
-    // ── Collapsed header ────────────────────────────────────────────
     const hdr = document.createElement('div');
     hdr.className = 'acc-header';
     hdr.setAttribute('role', 'button');
@@ -503,9 +555,8 @@ function buildPhoneAccordion() {
     const summary = document.createElement('div');
     summary.className = 'acc-summary';
 
-    // One pill per band showing best S-unit when collapsed
     const rp = [];
-    BANDS.forEach((band, bi) => {
+    BANDS.forEach((band) => {
       const pill = document.createElement('span');
       pill.className   = 'acc-pill no-data';
       pill.textContent = band.label;
@@ -522,11 +573,10 @@ function buildPhoneAccordion() {
     hdr.appendChild(summary);
     hdr.appendChild(chevron);
 
-    // ── Expanded body ───────────────────────────────────────────────
     const body = document.createElement('div');
     body.className = 'acc-body';
 
-    const rc = [], rs = [];
+    const rc = [], rs = [], rmAcc = [];
     BANDS.forEach((band, bi) => {
       const brow = document.createElement('div');
       brow.className = 'acc-band-row';
@@ -546,12 +596,19 @@ function buildPhoneAccordion() {
       su.className   = 'acc-s-unit no-data';
       su.textContent = '--';
 
+      // Per-band mode indicator row
+      const abmr = document.createElement('div');
+      abmr.className = 'band-mode-row band-mode-row-phone';
+      buildModeRow(abmr, false, new Set());
+
       brow.appendChild(lbl);
       brow.appendChild(wrap);
       brow.appendChild(su);
       body.appendChild(brow);
+      body.appendChild(abmr);
       rc.push(cv);
       rs.push(su);
+      rmAcc.push(abmr);
     });
 
     const ftr = document.createElement('div');
@@ -566,13 +623,12 @@ function buildPhoneAccordion() {
     accCanvases.push(rc);
     accSUnits.push(rs);
     accFooters.push(ftr);
+    accModeRows.push(rmAcc);
 
-    // Tap to expand/collapse
     hdr.addEventListener('click', () => {
       const open = row.classList.toggle('open');
       hdr.setAttribute('aria-expanded', String(open));
       if (open) {
-        // Size canvases now they are visible — always sync to container
         requestAnimationFrame(() => {
           rc.forEach(cv => {
             cv.width  = cv.offsetWidth  || 200;
@@ -587,7 +643,6 @@ function buildPhoneAccordion() {
   });
 }
 
-// ── Build both, CSS decides which is visible ──────────────────────────────────
 function buildPanels() {
   buildDesktopPanels();
   buildPhoneAccordion();
@@ -611,7 +666,7 @@ function refreshUI() {
         su.className   = hasData ? 's-unit' : 's-unit no-data';
       }
 
-      // Phone — expanded body canvases (only draw if visible)
+      // Phone
       if (accCanvases[ri]) {
         const cv = accCanvases[ri][bi];
         const cw = cv.offsetWidth;
@@ -624,7 +679,6 @@ function refreshUI() {
         su.textContent = hasData ? snrToSUnit(snr) : '--';
         su.className   = hasData ? 'acc-s-unit' : 'acc-s-unit no-data';
 
-        // Update collapsed pill
         const pill = accPills[ri][bi];
         if (hasData) {
           pill.textContent = `${BANDS[bi].label} ${snrToSUnit(snr)}`;
@@ -634,9 +688,14 @@ function refreshUI() {
           pill.className   = 'acc-pill no-data';
         }
       }
+
+      // Per-band mode rows
+      const bModes   = m.activeModes(bi);
+      const bHasData = m.hasValue[bi];
+      if (deskModeRows[ri]?.[bi]) buildModeRow(deskModeRows[ri][bi], bHasData, bModes);
+      if (accModeRows[ri]?.[bi])  buildModeRow(accModeRows[ri][bi],  bHasData, bModes);
     });
 
-    // Footers
     const txt = m.hasAnyData ? `${m.totalSpots} spots` : 'no data';
     if (footers[ri])    footers[ri].textContent    = txt;
     if (accFooters[ri]) accFooters[ri].textContent = txt;
@@ -644,8 +703,10 @@ function refreshUI() {
 }
 
 // ── Polling ───────────────────────────────────────────────────────────────────
-let pollTimer = null;
-let isRunning = false;
+let pollTimer    = null;
+let isRunning    = false;
+let geoWatchId   = null;
+let skimmerCount = 0;
 
 function bandForFreq(khz) {
   const i = BANDS.findIndex(b => khz >= b.min && khz <= b.max);
@@ -653,7 +714,11 @@ function bandForFreq(khz) {
 }
 
 async function pollOnce() {
-  const mode    = document.querySelector('input[name="vantage-mode"]:checked').value;
+  const mode = document.querySelector('input[name="vantage-mode"]:checked').value;
+
+  // Clear per-cycle mode sets
+  meters.forEach(m => m.beginPollCycle());
+
   let data;
   try {
     const resp = await fetch(PROXY_BASE + '/rbn', { signal: AbortSignal.timeout(12000) });
@@ -676,12 +741,12 @@ async function pollOnce() {
 
   let totalSpots = 0, spotsFromVantage = 0, spotsProcessed = 0, spotsUnknown = 0;
   const pendingGrid = [];
-  // Track which region/band combos received a sample this poll
   const sampled = Array.from({length: REGIONS.length}, () => new Uint8Array(BANDS.length));
+  const regionSkimmers = new Set();
 
   for (const [spotCall, spot] of Object.entries(data)) {
     if (!spot.lsn || typeof spot.lsn !== 'object') continue;
-    if ((spot.age ?? 0) > 120) continue;   // ignore spots older than 2 minutes (age in seconds)
+    if ((spot.age ?? 0) > 120) continue;
     const freq = parseFloat(String(spot.freq).replace(/\s/g, ''));
     if (!freq) continue;
     const bi = bandForFreq(freq);
@@ -697,34 +762,51 @@ async function pollOnce() {
       if (mode === 'region') {
         const spotterRegion = classifyCallsign(listenerCall);
         if (spotterRegion !== vantageRegion) continue;
+        regionSkimmers.add(listenerCall.toUpperCase().split('/')[0]);
         spotsFromVantage++;
         if (dxRegion < 0) { spotsUnknown++; continue; }
-        meters[dxRegion].addSample(bi, snr);
+        meters[dxRegion].addSample(bi, snr, spot.mode || '');
         sampled[dxRegion][bi] = 1;
         spotsProcessed++;
       } else {
-        pendingGrid.push({ listenerCall, bi, snr, dxRegion });
+        pendingGrid.push({ listenerCall, bi, snr, dxRegion, spotMode: spot.mode || '' });
       }
     }
   }
 
   // Grid mode — resolve spotters asynchronously
   if (mode === 'grid' && gridLL) {
-    for (const { listenerCall, bi, snr, dxRegion } of pendingGrid) {
+    const skimmersInRadius = new Set();
+    for (const { listenerCall, bi, snr, dxRegion, spotMode } of pendingGrid) {
       if (!isRunning) break;
       const ll = await resolveSpotter(listenerCall);
       if (!ll) continue;
       const dist = distanceMiles(gridLL.lat, gridLL.lon, ll.lat, ll.lon);
       if (dist > radiusMiles) continue;
+      skimmersInRadius.add(listenerCall.toUpperCase().split('/')[0]);
       spotsFromVantage++;
       if (dxRegion < 0) { spotsUnknown++; continue; }
-      meters[dxRegion].addSample(bi, snr);
+      meters[dxRegion].addSample(bi, snr, spotMode);
       sampled[dxRegion][bi] = 1;
       spotsProcessed++;
     }
+    skimmerCount = skimmersInRadius.size;
+    updateSkimmerCount(skimmerCount, true);
+
+    // If no skimmers heard within radius, clear all meters immediately
+    // (don't rely on slow EMA decay — give instant feedback)
+    if (skimmerCount === 0) {
+      meters.forEach(m => m.reset());
+    }
   }
 
-  // Decay any region/band that received no samples this poll
+  // Region mode skimmer count
+  if (mode === 'region') {
+    skimmerCount = regionSkimmers.size;
+    updateSkimmerCount(skimmerCount, false);
+  }
+
+  // Decay bands that received no samples
   for (let ri = 0; ri < REGIONS.length; ri++)
     for (let bi = 0; bi < BANDS.length; bi++)
       if (!sampled[ri][bi]) meters[ri].decayBand(bi);
@@ -740,7 +822,6 @@ async function pollOnce() {
 
 function startPolling() {
   if (isRunning) return;
-
   const mode = document.querySelector('input[name="vantage-mode"]:checked').value;
   if (mode === 'grid') {
     const g = document.getElementById('grid-input').value.trim();
@@ -749,13 +830,11 @@ function startPolling() {
       return;
     }
   }
-
   isRunning = true;
   document.getElementById('btn-start').disabled = true;
   document.getElementById('btn-stop').disabled  = false;
   setStatus('Polling started — waiting for first data…', 'ok');
   saveSettings();
-
   pollOnce();
   pollTimer = setInterval(pollOnce, POLL_MS);
 }
@@ -771,6 +850,9 @@ function stopPolling() {
 
 function resetMeters() {
   meters.forEach(m => m.reset());
+  skimmerCount = 0;
+  const resetEl = document.getElementById('skimmer-count');
+  if (resetEl) { resetEl.textContent = ''; resetEl.className = 'skimmer-count'; }
   refreshUI();
   setStatus('Meters reset.', 'warn');
 }
@@ -781,15 +863,61 @@ function setStatus(msg, cls = '') {
   el.className   = cls;
 }
 
+// ── Skimmer count display ─────────────────────────────────────────────────────
+function updateSkimmerCount(n, isGrid) {
+  const el = document.getElementById('skimmer-count');
+  if (!el) return;
+  if (n === 0) {
+    // In grid mode with no hits, warn the user; in region mode just clear
+    el.textContent = isGrid ? 'no skimmers' : '';
+    el.className   = isGrid ? 'skimmer-count skimmer-none' : 'skimmer-count';
+  } else {
+    el.textContent = n === 1 ? '1 skimmer' : `${n} skimmers`;
+    el.className   = n < 3 ? 'skimmer-count skimmer-few' : 'skimmer-count skimmer-ok';
+  }
+}
+
+// ── Auto-update grid from GPS ─────────────────────────────────────────────────
+function startAutoUpdate() {
+  if (!('geolocation' in navigator)) {
+    setStatus('Geolocation not available on this device.', 'error');
+    document.getElementById('autoupdate-cb').checked = false;
+    return;
+  }
+  geoWatchId = navigator.geolocation.watchPosition(
+    pos => {
+      const newGrid = latLonToGrid(pos.coords.latitude, pos.coords.longitude);
+      if (!newGrid) return;
+      const current = document.getElementById('grid-input').value.trim().toUpperCase().slice(0, 4);
+      if (newGrid.slice(0, 4) !== current) {
+        document.getElementById('grid-input').value = newGrid;
+        saveSettings();
+        if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
+      }
+    },
+    err => {
+      setStatus(`GPS error: ${err.message}`, 'error');
+      stopAutoUpdate();
+      document.getElementById('autoupdate-cb').checked = false;
+    },
+    { enableHighAccuracy: false, maximumAge: 30000, timeout: 10000 }
+  );
+}
+
+function stopAutoUpdate() {
+  if (geoWatchId !== null) {
+    navigator.geolocation.clearWatch(geoWatchId);
+    geoWatchId = null;
+  }
+}
+
 // ── Settings ──────────────────────────────────────────────────────────────────
-// ── Distance unit (mi / km) ───────────────────────────────────────────────────
-const RADIUS_VALUES = [250, 500, 1000, 1500, 2000, 5000];
-let unitPref = 'auto';   // 'auto' | 'mi' | 'km'
+const RADIUS_VALUES = [125, 250, 500, 1000, 1500, 2000, 5000];
+let unitPref = 'auto';
 
 function getUnit() {
   if (unitPref === 'mi') return 'mi';
   if (unitPref === 'km') return 'km';
-  // auto: km outside North America (regions 0-2)
   const ri = parseInt(document.getElementById('region-select').value);
   return ri <= 2 ? 'mi' : 'km';
 }
@@ -797,16 +925,14 @@ function getUnit() {
 function updateRadiusLabels() {
   const u   = getUnit();
   const sel = document.getElementById('radius-select');
-  RADIUS_VALUES.forEach((v, i) => { sel.options[i].text = `${v} ${u}`; });
+  RADIUS_VALUES.forEach((v, i) => { if (sel.options[i]) sel.options[i].text = `${v} ${u}`; });
   const btn = document.getElementById('unit-toggle');
-  if (btn) {
-    btn.textContent = u;
-    btn.dataset.auto = (unitPref === 'auto') ? '1' : '0';
-  }
+  if (btn) { btn.textContent = u; btn.dataset.auto = (unitPref === 'auto') ? '1' : '0'; }
 }
 
 function getRadiusMiles() {
-  const v = RADIUS_VALUES[document.getElementById('radius-select').selectedIndex] ?? 500;
+  const idx = document.getElementById('radius-select').selectedIndex;
+  const v   = RADIUS_VALUES[idx] ?? 500;
   return getUnit() === 'km' ? v * 0.621371 : v;
 }
 
@@ -814,10 +940,11 @@ function saveSettings() {
   const mode = document.querySelector('input[name="vantage-mode"]:checked').value;
   Settings.save({
     mode,
-    regionIndex: parseInt(document.getElementById('region-select').value),
-    grid:        document.getElementById('grid-input').value.trim().toUpperCase(),
-    radiusIndex: document.getElementById('radius-select').selectedIndex,
-    unit:        unitPref,
+    regionIndex:  parseInt(document.getElementById('region-select').value),
+    grid:         document.getElementById('grid-input').value.trim().toUpperCase(),
+    radiusIndex:  document.getElementById('radius-select').selectedIndex,
+    unit:         unitPref,
+    autoUpdate:   document.getElementById('autoupdate-cb')?.checked || false,
   });
 }
 
@@ -825,8 +952,10 @@ function applySettings(s) {
   document.querySelector(`input[name="vantage-mode"][value="${s.mode}"]`).checked = true;
   document.getElementById('region-select').value = s.regionIndex;
   document.getElementById('grid-input').value    = s.grid || '';
-  document.getElementById('radius-select').selectedIndex = s.radiusIndex ?? 1;
+  document.getElementById('radius-select').selectedIndex = s.radiusIndex ?? 2;
   unitPref = s.unit ?? 'auto';
+  if (document.getElementById('autoupdate-cb'))
+    document.getElementById('autoupdate-cb').checked = s.autoUpdate || false;
   updateRadiusLabels();
   updateModeUI(s.mode);
 }
@@ -837,16 +966,33 @@ function updateModeUI(mode) {
   document.getElementById('grid-input').disabled     = !isGrid;
   document.getElementById('radius-select').disabled  = !isGrid;
   document.getElementById('unit-toggle').disabled    = !isGrid;
+
+  // Skimmer count — always visible, dimmed when not in grid mode
+  const sc = document.getElementById('skimmer-count');
+  if (sc) sc.classList.remove('skimmer-disabled');
+
+  // Auto-update — visible always; only enabled on mobile AND in grid mode
+  const al = document.getElementById('autoupdate-label');
+  const cb = document.getElementById('autoupdate-cb');
+  const mobileAndGrid = isGrid && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+  if (al) al.classList.toggle('check-disabled', !mobileAndGrid);
+  if (cb) { cb.disabled = !mobileAndGrid; if (!mobileAndGrid) cb.checked = false; }
+
+  // Also enable/disable the radius label
+  const rl = document.getElementById('radius-label');
+  if (rl) rl.classList.toggle('ctrl-label-disabled', !isGrid);
+
+  if (!isGrid) stopAutoUpdate();
 }
 
 // ── Geo auto-detect ───────────────────────────────────────────────────────────
 function applyLocation(lat, lon) {
-  const ri  = regionFromLatLon(lat, lon);
+  const ri   = regionFromLatLon(lat, lon);
   const grid = latLonToGrid(lat, lon);
   const sel  = document.getElementById('region-select');
   if (parseInt(sel.value) !== ri) {
     sel.value = ri;
-    sel.dispatchEvent(new Event('change'));  // triggers polling restart if running
+    sel.dispatchEvent(new Event('change'));
   }
   if (grid && !document.getElementById('grid-input').value) {
     document.getElementById('grid-input').value = grid;
@@ -856,11 +1002,10 @@ function applyLocation(lat, lon) {
 }
 
 async function autoDetect() {
-  // Try browser geolocation first (most accurate, works on HTTPS)
   if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(
       pos => applyLocation(pos.coords.latitude, pos.coords.longitude),
-      () => autoDetectByIP()  // user denied or unavailable — fall back to IP
+      () => autoDetectByIP()
     );
   } else {
     autoDetectByIP();
@@ -871,9 +1016,7 @@ async function autoDetectByIP() {
   try {
     const resp = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(5000) });
     const data = await resp.json();
-    if (data.latitude && data.longitude) {
-      applyLocation(data.latitude, data.longitude);
-    }
+    if (data.latitude && data.longitude) applyLocation(data.latitude, data.longitude);
   } catch {}
 }
 
@@ -881,14 +1024,14 @@ async function autoDetectByIP() {
 document.addEventListener('DOMContentLoaded', () => {
   buildPanels();
 
-  // Restore settings
   const s = Settings.load();
   applySettings(s);
 
-  // Auto-detect if no grid saved
-  if (!s.grid) autoDetect(); else autoDetect(); // always update region
+  if (!s.grid) autoDetect(); else autoDetect();
 
-  // Mode radio buttons
+  // Restore auto-update if it was enabled
+  if (s.autoUpdate && s.mode === 'grid') startAutoUpdate();
+
   document.querySelectorAll('input[name="vantage-mode"]').forEach(rb => {
     rb.addEventListener('change', () => {
       updateModeUI(rb.value);
@@ -897,7 +1040,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Region select — also refresh unit labels if on auto
   document.getElementById('region-select').addEventListener('change', () => {
     if (unitPref === 'auto') updateRadiusLabels();
     saveSettings();
@@ -909,7 +1051,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
   });
 
-  // mi / km toggle
   document.getElementById('unit-toggle').addEventListener('click', () => {
     const current = getUnit();
     unitPref = current === 'mi' ? 'km' : 'mi';
@@ -918,12 +1059,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
   });
 
-  // Grid input
   const gi = document.getElementById('grid-input');
-  gi.addEventListener('input', () => {
-    gi.style.borderColor = '';
-    saveSettings();
-  });
+  gi.addEventListener('input', () => { gi.style.borderColor = ''; saveSettings(); });
   gi.addEventListener('blur', () => {
     const g = gi.value.trim();
     if (g && !isValidGrid(g)) {
@@ -935,7 +1072,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Buttons
+  // Auto-update checkbox
+  const cb = document.getElementById('autoupdate-cb');
+  if (cb) {
+    cb.addEventListener('change', e => {
+      saveSettings();
+      if (e.target.checked) startAutoUpdate(); else stopAutoUpdate();
+    });
+  }
+
   document.getElementById('btn-start').addEventListener('click', startPolling);
   document.getElementById('btn-stop').addEventListener('click', stopPolling);
   document.getElementById('btn-reset').addEventListener('click', resetMeters);
@@ -957,9 +1102,9 @@ function updateUTC() {
 
 async function fetchSolar() {
   try {
-    const ctrl = new AbortController();
+    const ctrl  = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 15000);
-    const resp = await fetch('/solar', { signal: ctrl.signal });
+    const resp  = await fetch('/solar', { signal: ctrl.signal });
     clearTimeout(timer);
     if (!resp.ok) return;
     const d = await resp.json();

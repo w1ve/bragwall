@@ -27,6 +27,7 @@
         <p class="subtitle">REVERSE BEACON NETWORK SIGNAL LEVELS</p>
       </div>
       <div class="byline">by Gerry, W1VE</div>
+      <div class="byline byline-tnx">TNX ReverseBeacon Team!</div>
     </div>
   </header>
 
@@ -59,7 +60,16 @@
              maxlength="6" disabled autocomplete="off" autocorrect="off"
              autocapitalize="characters" spellcheck="false">
 
+      <!-- Auto-update grid from GPS — directly right of grid box -->
+      <label class="check-label" id="autoupdate-label">
+        <input type="checkbox" id="autoupdate-cb" disabled>
+        <span>Auto</span>
+      </label>
+
+      <span class="ctrl-label" id="radius-label">Skimmer Radius:</span>
+
       <select id="radius-select" class="ctrl-select" disabled>
+        <option value="125">125 mi</option>
         <option value="250">250 mi</option>
         <option value="500" selected>500 mi</option>
         <option value="1000">1000 mi</option>
@@ -69,6 +79,9 @@
       </select>
 
       <button id="unit-toggle" class="unit-toggle" disabled>mi</button>
+
+      <!-- Skimmer count — always visible, dimmed when not in grid mode -->
+      <span id="skimmer-count" class="skimmer-count skimmer-disabled"></span>
     </div>
 
     <div class="btn-sw-row">

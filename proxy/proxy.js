@@ -79,7 +79,7 @@ connectFeed();
 // ── Hamqth backup ─────────────────────────────────────────────────────────────
 const HAMQTH_URL =
   'https://www.hamqth.com/rbn_data.php' +
-  '?data=1&band=160,80,40,20,15,10,6' +
+  '?data=1&band=160,80,40,30,20,17,15,12,10,6' +
   '&fromcont=AF,AN,AS,EU,NA,OC,SA' +
   '&mode=CW,RTTY,FT8,PSK31,PSK63' +
   '&cont=AF,AN,AS,EU,NA,OC,SA' +
