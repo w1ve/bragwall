@@ -355,97 +355,187 @@ function segColor(i, bright, t) {
   return t.dimSeg;
 }
 
+// ── Draw a single badge panel (used for both single-band and all-band) ─────────
+// Layout (same for small and full, scaled):
+//   [title bar: "SNR {from} to {to} on {band}"]
+//   [mode badges row]
+//   [S-meter bar]
+//   [S-unit label right, attribution bottom-right]
 function renderBadge(params) {
   const { snr, modes, hasData, fromLabel, toLabel, bandLabel, theme, size, dataAge } = params;
   const t = THEMES[theme] || THEMES.dark;
 
-  // Dimensions
-  const W = size === 'small' ? 220 : 380;
-  const H = size === 'small' ? 72  : 100;
+  const small = size === 'small';
+  const W = small ? 220 : 380;
+  const H = small ? 56  : 80;
   const canvas = createCanvas(W, H);
   const ctx    = canvas.getContext('2d');
 
-  // Background
+  drawBadgePanel(ctx, { snr, modes, hasData, fromLabel, toLabel, bandLabel, dataAge, t, small, W, H, x: 0, y: 0 });
+  return canvas.toBuffer('image/png');
+}
+
+// ── All-band badge: 2 rows × 5 bands, each cell small-size ────────────────────
+function renderAllBandsBadge(params) {
+  const { allResults, fromLabel, toLabel, theme, dataAge } = params;
+  const t = THEMES[theme] || THEMES.dark;
+
+  // 5 bands per row, 2 rows — each cell 220×56 (small size)
+  const CW = 220, CH = 56;
+  const COLS = 5, ROWS = 2;
+  const W = CW * COLS;
+  const H = CH * ROWS;
+  const canvas = createCanvas(W, H);
+  const ctx    = canvas.getContext('2d');
+
+  // Dark background fill
   ctx.fillStyle = t.bg;
   ctx.fillRect(0, 0, W, H);
 
-  // Border
+  BANDS.forEach((band, i) => {
+    const col = i % COLS;
+    const row = Math.floor(i / COLS);
+    const x   = col * CW;
+    const y   = row * CH;
+    const r   = allResults[i] || { snr: 0, modes: new Set(), hasData: false };
+    drawBadgePanel(ctx, {
+      snr: r.snr, modes: r.modes, hasData: r.hasData,
+      fromLabel, toLabel, bandLabel: band.label,
+      dataAge, t, small: true, W: CW, H: CH, x, y,
+    });
+  });
+
+  // Outer border
   ctx.strokeStyle = t.border;
   ctx.lineWidth   = 1;
   ctx.strokeRect(0.5, 0.5, W-1, H-1);
 
-  // Title bar
-  ctx.fillStyle = t.bg2;
-  ctx.fillRect(1, 1, W-2, size === 'small' ? 16 : 20);
-
-  // Title text
-  ctx.fillStyle = t.accent;
-  ctx.font      = `bold ${size === 'small' ? 9 : 11}px "DejaVu Sans Mono"`;
-  ctx.textAlign = 'center';
-  ctx.fillText('RBN S-METER', W/2, size === 'small' ? 11 : 14);
-
-  const titleH = size === 'small' ? 18 : 22;
-
-  if (size === 'small') {
-    // ── Small: single band compact layout ──────────────────────────────
-    ctx.fillStyle = t.textDim;
-    ctx.font      = '8px "DejaVu Sans Mono"';
-    ctx.textAlign = 'left';
-    ctx.fillText(`${fromLabel} → ${toLabel}`, 6, titleH + 10);
-
-    ctx.fillStyle = t.text;
-    ctx.font      = 'bold 8px "DejaVu Sans Mono"';
-    ctx.textAlign = 'right';
-    ctx.fillText(bandLabel, W - 6, titleH + 10);
-
-    // Bar
-    const barX = 6, barY = titleH + 14, barW = W-12, barH = 12;
-    drawBar(ctx, barX, barY, barW, barH, snr, 0, hasData, t);
-
-    // S-unit
-    ctx.fillStyle = hasData ? t.green : t.textDim;
-    ctx.font      = `bold ${size === 'small' ? 10 : 13}px "DejaVu Sans Mono"`;
-    ctx.textAlign = 'center';
-    ctx.fillText(hasData ? snrToSUnit(snr) : '--', W/2, titleH + 40);
-
-    // Mode row
-    drawModeRow(ctx, 6, titleH + 44, W-12, 12, modes, hasData, t, true);
-
-  } else {
-    // ── Full: with labels and bigger bar ───────────────────────────────
-    ctx.fillStyle = t.textDim;
-    ctx.font      = '9px "DejaVu Sans Mono"';
-    ctx.textAlign = 'left';
-    ctx.fillText(`From: ${fromLabel}`, 8, titleH + 12);
-    ctx.fillText(`To:   ${toLabel}`,   8, titleH + 24);
-
-    ctx.fillStyle = t.accent;
-    ctx.font      = 'bold 18px "DejaVu Sans Mono"';
-    ctx.textAlign = 'right';
-    ctx.fillText(bandLabel, W - 8, titleH + 22);
-
-    // Bar
-    const barX = 8, barY = titleH + 30, barW = W-80, barH = 16;
-    drawBar(ctx, barX, barY, barW, barH, snr, 0, hasData, t);
-
-    // S-unit
-    ctx.fillStyle = hasData ? t.green : t.textDim;
-    ctx.font      = 'bold 14px "DejaVu Sans Mono"';
-    ctx.textAlign = 'right';
-    ctx.fillText(hasData ? snrToSUnit(snr) : '--', W-8, barY + barH - 1);
-
-    // Mode row
-    drawModeRow(ctx, 8, titleH + 52, W-16, 12, modes, hasData, t, false);
-  }
-
-  // Attribution + data age (bottom right)
-  const ageStr = dataAge < 120 ? `${dataAge}s ago` : `${Math.floor(dataAge/60)}m ago`;
-  ctx.fillStyle = t.textDim;
-  ctx.font      = '7px "DejaVu Sans Mono"';
-  ctx.textAlign = 'right';
-  ctx.fillText(`by W1VE · ${ageStr}`, W - 4, H - 3);
-
   return canvas.toBuffer('image/png');
+}
+
+// ── Core panel renderer — draws one badge cell at position (x, y) ─────────────
+function drawBadgePanel(ctx, { snr, modes, hasData, fromLabel, toLabel, bandLabel, dataAge, t, small, W, H, x, y }) {
+  const PAD    = small ? 5  : 8;
+  const titleH = small ? 13 : 18;  // height of title bar
+  const modeH  = small ? 11 : 13;  // height of mode badge row
+  const barH   = small ? 12 : 16;  // S-meter bar height
+  const gap    = small ? 2  : 3;   // gap between elements
+  const attrH  = small ? 9  : 10;  // attribution line height
+
+  // Background
+  ctx.fillStyle = t.bg;
+  ctx.fillRect(x, y, W, H);
+
+  // Border
+  ctx.strokeStyle = t.border;
+  ctx.lineWidth   = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, W - 1, H - 1);
+
+  // ── Title bar ──────────────────────────────────────────────────────────────
+  ctx.fillStyle = t.bg2;
+  ctx.fillRect(x + 1, y + 1, W - 2, titleH);
+
+  // "SNR {from} to {to} on {band}"
+  const titleStr = `SNR ${fromLabel} to ${toLabel} on ${bandLabel}`;
+  ctx.fillStyle  = t.accent;
+  ctx.font       = `bold ${small ? 8 : 10}px "DejaVu Sans Mono"`;
+  ctx.textAlign  = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(titleStr, x + W / 2, y + 1 + titleH / 2, W - 4);
+
+  // ── Mode badges row (above S-meter) ───────────────────────────────────────
+  const modeY = y + titleH + gap + 1;
+  drawModeBadges(ctx, x + PAD, modeY, W - PAD * 2, modeH, modes, hasData, t, small);
+
+  // ── S-meter bar ───────────────────────────────────────────────────────────
+  const barY = modeY + modeH + gap;
+  const barW = W - PAD * 2;
+  drawBar(ctx, x + PAD, barY, barW, barH, snr, 0, hasData, t);
+
+  // S-unit label — right of bar, vertically centred on it
+  ctx.fillStyle    = hasData ? t.green : t.textDim;
+  ctx.font         = `bold ${small ? 9 : 12}px "DejaVu Sans Mono"`;
+  ctx.textAlign    = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(hasData ? snrToSUnit(snr) : '--', x + W - PAD + (small ? 0 : 2), barY + barH / 2);
+
+  // ── Attribution — bottom right ─────────────────────────────────────────────
+  const ageStr = dataAge < 120 ? `${dataAge}s ago` : `${Math.floor(dataAge/60)}m ago`;
+  ctx.fillStyle    = t.textDim;
+  ctx.font         = `${small ? 6 : 7}px "DejaVu Sans Mono"`;
+  ctx.textAlign    = 'right';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(`RBN S-Meter by W1VE · ${ageStr}`, x + W - 3, y + H - 2);
+}
+
+// ── Mode badges row — same colour scheme as the PWA ───────────────────────────
+// Order: CW, SSB, RY, FTx  (matches DISPLAY_MODES in app.js)
+function drawModeBadges(ctx, x, y, w, h, modes, hasData, t, small) {
+  const slots = [
+    { label: 'CW',  sources: ['CW'],         isSSB: false },
+    { label: 'SSB', sources: ['SSB'],         isSSB: true  },
+    { label: 'RY',  sources: ['RTTY'],        isSSB: false },
+    { label: 'FTx', sources: ['FT8', 'FT4'],  isSSB: false },
+  ];
+
+  const badgeW = small ? 28 : 40;
+  const badgeH = h;
+  const gapB   = small ? 3 : 4;
+  const totalW = slots.length * badgeW + (slots.length - 1) * gapB;
+  let bx = x + Math.max(0, (w - totalW) / 2);  // centre the badge row
+
+  ctx.font         = `bold ${small ? 7 : 9}px "DejaVu Sans Mono"`;
+  ctx.textBaseline = 'middle';
+
+  slots.forEach(({ label, sources, isSSB }) => {
+    const active = hasData && sources.some(s => modes.has(s));
+
+    let bg, border, fg;
+    if (!hasData) {
+      // No data yet — dim
+      bg = 'transparent'; border = t.modeX; fg = t.textDim;
+    } else if (active && isSSB) {
+      // SSB active — gold, matches app .mode-ssb
+      bg = '#7a5500'; border = '#ffd000'; fg = '#ffffff';
+    } else if (active) {
+      // CW/RY/FTx active — green, matches app .mode-active
+      bg = '#006e3a'; border = '#00ff99'; fg = '#ffffff';
+    } else if (isSSB) {
+      // SSB not active — dim (no red X for SSB)
+      bg = 'transparent'; border = t.textDim; fg = t.textDim;
+    } else {
+      // Inactive — muted red, matches app .mode-absent
+      bg = 'transparent'; border = t.modeX; fg = t.modeX;
+    }
+
+    // Badge background
+    if (bg !== 'transparent') {
+      ctx.fillStyle = bg;
+      ctx.fillRect(bx, y, badgeW, badgeH);
+    }
+
+    // Badge border
+    ctx.strokeStyle = border;
+    ctx.lineWidth   = 0.75;
+    ctx.strokeRect(bx + 0.5, y + 0.5, badgeW - 1, badgeH - 1);
+
+    // Badge text: ✓CW, ✗RY etc — same convention as PWA
+    ctx.fillStyle    = fg;
+    ctx.textAlign    = 'center';
+    let txt;
+    if (!hasData) {
+      txt = label;
+    } else if (active) {
+      txt = '\u2713' + label;
+    } else if (!isSSB) {
+      txt = '\u2717' + label;
+    } else {
+      txt = label;
+    }
+    ctx.fillText(txt, bx + badgeW / 2, y + badgeH / 2);
+
+    bx += badgeW + gapB;
+  });
 }
 
 function drawBar(ctx, x, y, w, h, snr, peak, hasData, t) {
@@ -469,40 +559,10 @@ function drawBar(ctx, x, y, w, h, snr, peak, hasData, t) {
   }
 }
 
-function drawModeRow(ctx, x, y, w, h, modes, hasData, t, small) {
-  const labels = ['CW','RTTY','FT8','FT4','SSB'];
-  const colW   = w / labels.length;
-  ctx.font      = `${small ? 7 : 8}px "DejaVu Sans Mono"`;
-  ctx.textAlign = 'center';
-
-  labels.forEach((mode, i) => {
-    const cx     = x + (i + 0.5) * colW;
-    const isSSB  = mode === 'SSB';
-    const active = modes.has(mode);
-
-    if (!hasData) {
-      ctx.fillStyle = t.textDim;
-      ctx.fillText(isSSB ? '(SSB)' : mode, cx, y + h);
-    } else if (active && isSSB) {
-      ctx.fillStyle = t.modeSSB;
-      ctx.fillText('(\u2713SSB)', cx, y + h);
-    } else if (active) {
-      ctx.fillStyle = t.accent;
-      ctx.fillText('\u2713' + mode, cx, y + h);
-    } else if (isSSB) {
-      ctx.fillStyle = t.textDim;
-      ctx.fillText('(SSB)', cx, y + h);
-    } else {
-      ctx.fillStyle = t.modeX;
-      ctx.fillText('\u2717' + mode, cx, y + h);
-    }
-  });
-}
-
 function renderWarmup(theme, size) {
   const t = THEMES[theme] || THEMES.dark;
   const W = size === 'small' ? 220 : 380;
-  const H = size === 'small' ? 72  : 100;
+  const H = size === 'small' ? 56  : 80;
   const canvas = createCanvas(W, H);
   const ctx    = canvas.getContext('2d');
   ctx.fillStyle = t.bg;
@@ -510,16 +570,17 @@ function renderWarmup(theme, size) {
   ctx.strokeStyle = t.border; ctx.lineWidth = 1;
   ctx.strokeRect(0.5, 0.5, W-1, H-1);
   ctx.fillStyle = t.bg2;
-  ctx.fillRect(1, 1, W-2, size === 'small' ? 16 : 20);
-  ctx.fillStyle = t.accent; ctx.font = `bold ${size === 'small' ? 9 : 11}px "DejaVu Sans Mono"`;
-  ctx.textAlign = 'center';
-  ctx.fillText('RBN S-METER', W/2, size === 'small' ? 11 : 14);
+  ctx.fillRect(1, 1, W-2, size === 'small' ? 13 : 18);
+  ctx.fillStyle = t.accent;
+  ctx.font = `bold ${size === 'small' ? 8 : 10}px "DejaVu Sans Mono"`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('RBN S-METER', W/2, size === 'small' ? 7 : 10);
   ctx.fillStyle = t.textDim; ctx.font = '9px "DejaVu Sans Mono"';
-  ctx.fillText('Warming up...', W/2, H/2);
-  ctx.fillText('retry in ~30s', W/2, H/2 + 13);
-  ctx.fillStyle = t.textDim; ctx.font = '7px "DejaVu Sans Mono"';
-  ctx.textAlign = 'right';
-  ctx.fillText('by W1VE', W-4, H-3);
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Warming up... retry in ~30s', W/2, H/2 + 4);
+  ctx.fillStyle = t.textDim; ctx.font = '6px "DejaVu Sans Mono"';
+  ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+  ctx.fillText('RBN S-Meter by W1VE', W-3, H-2);
   return canvas.toBuffer('image/png');
 }
 
@@ -556,11 +617,13 @@ const server = http.createServer(async (req, res) => {
   // Parse common params
   const theme  = (q.theme === 'light') ? 'light' : 'dark';
   const size   = (q.size  === 'full')  ? 'full'  : 'small';
-  const band   = (q.band  || '20m').toLowerCase().replace('m','') + 'm';
+  const bandRaw = (q.band || '20m').toLowerCase();
+  const isAllBands = bandRaw === 'all';
+  const band   = isAllBands ? 'all' : bandRaw.replace('m','') + 'm';
   const validBands = BANDS.map(b => b.label);
-  if (!validBands.includes(band)) {
+  if (!isAllBands && !validBands.includes(band)) {
     res.writeHead(400, { 'Content-Type': 'text/plain' });
-    res.end(`Invalid band. Use one of: ${validBands.join(', ')}`);
+    res.end(`Invalid band. Use one of: ${validBands.join(', ')}, all`);
     return;
   }
 
@@ -608,13 +671,37 @@ const server = http.createServer(async (req, res) => {
   const data = await getRbnData();
 
   if (!data) {
-    // Data not yet available — return warming-up image
     const png = renderWarmup(theme, size);
     sendPng(res, png, 0, true);
     return;
   }
 
-  // Compute metrics
+  const dataAge = Math.round((now - rbnFetchedAt) / 1000);
+
+  // ── All-bands path ─────────────────────────────────────────────────────────
+  if (isAllBands) {
+    const fromLabel = pathname === '/badge/region'
+      ? (REGIONS.find(r => r.key === fromKey)?.label || fromKey)
+      : `Grid ${q.grid?.toUpperCase()}`;
+    const toLabel = REGIONS.find(r => r.key === toKey)?.label || toKey;
+
+    const allResults = BANDS.map(b => {
+      if (pathname === '/badge/region') {
+        return computeRegionBand(data, fromKey, toKey, b.label);
+      } else {
+        const grid   = (q.grid || '').toUpperCase();
+        const radius = parseInt(q.radius) || 500;
+        return computeGridBand(data, grid, radius, toKey, b.label);
+      }
+    });
+
+    const png = renderAllBandsBadge({ allResults, fromLabel, toLabel, theme, dataAge });
+    pngCache.set(cacheKey, { png, createdAt: now });
+    sendPng(res, png, 0, false);
+    return;
+  }
+
+  // ── Single-band path ───────────────────────────────────────────────────────
   let result;
   if (pathname === '/badge/region') {
     result = computeRegionBand(data, fromKey, toKey, band);
@@ -631,7 +718,6 @@ const server = http.createServer(async (req, res) => {
   const toLabel = REGIONS.find(r => r.key === toKey)?.label || toKey;
 
   // Render PNG
-  const dataAge = Math.round((now - rbnFetchedAt) / 1000);
   const png = renderBadge({
     snr: result.snr,
     modes: result.modes,
