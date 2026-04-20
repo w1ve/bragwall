@@ -30,13 +30,8 @@ const DATA_TTL_MS  = 60  * 1000;   // re-fetch RBN data every 60s
 const CACHE_TTL_MS = 10  * 60 * 1000;  // reuse rendered PNG for 10 min
 const MAX_AGE_MS   = 30  * 60 * 1000;  // delete cached images older than 30 min
 
-const RBN_URL =
-  'https://www.hamqth.com/rbn_data.php' +
-  '?data=1&band=160,80,40,20,15,10,6' +
-  '&fromcont=AF,AN,AS,EU,NA,OC,SA' +
-  '&mode=CW,RTTY,FT8,PSK31,PSK63' +
-  '&cont=AF,AN,AS,EU,NA,OC,SA' +
-  '&waz=*&itu=*&age=60&order=3';
+// Use the internal proxy which has live RBN telnet feed data
+const RBN_URL = process.env.RBN_PROXY_URL || 'http://rbn-smeter:3001/rbn';
 
 // ── Shared RBN data state ─────────────────────────────────────────────────────
 let rbnData       = null;   // parsed JSON from last fetch
@@ -213,8 +208,9 @@ function normMode(raw) {
 
 // ── Fetch RBN data (shared, cached 60s) ───────────────────────────────────────
 function fetchRbn() {
+  const transport = RBN_URL.startsWith('https') ? https : http;
   return new Promise((resolve, reject) => {
-    const req = https.request(RBN_URL, { headers: { 'User-Agent': 'RbnSMeter-Badge/1.0' }, timeout: 12000 }, res => {
+    const req = transport.request(RBN_URL, { headers: { 'User-Agent': 'RbnSMeter-Badge/1.0' }, timeout: 12000 }, res => {
       const chunks = [];
       res.on('data', c => chunks.push(c));
       res.on('end', () => {
