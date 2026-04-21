@@ -1,7 +1,7 @@
 {
-  "name": "rbn-badge",
+  "name": "hfsignals-badge",
   "version": "1.0.0",
-  "description": "RBN S-Meter embeddable badge image API",
+  "description": "hfsignals.live embeddable badge image API",
   "main": "badge.js",
   "scripts": {
     "start": "node badge.js"

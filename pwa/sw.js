@@ -1,4 +1,4 @@
-const CACHE = 'rbn-smeter-v9';
+const CACHE = 'hfsignals-live-v1';
 const ASSETS = [
   './',
   './index.html',
@@ -34,6 +34,7 @@ self.addEventListener('fetch', e => {
       url.hostname.includes('corsproxy.io') ||
       url.pathname === '/rbn' ||
       url.pathname === '/solar' ||
+      url.pathname === '/psk' ||
       url.pathname.startsWith('/hamdb/')) {
     e.respondWith(fetch(e.request).catch(() => new Response('', { status: 503 })));
     return;

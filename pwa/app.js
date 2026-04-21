@@ -11,6 +11,7 @@ const REGIONS = [
   'Asia',
   'Oceania',
 ];
+const REGION_KEYS = ['ENA', 'CNA', 'WNA', 'SA', 'EU', 'AF', 'AS', 'OC'];
 
 const BANDS = [
   { label: '160m', min: 1800,  max: 2000  },
@@ -34,6 +35,10 @@ const SSB_SNR_THRESHOLD = 20.0;  // min median SNR (dB) for SSB to be considered
 const KNOWN_MODES = ['CW', 'RTTY', 'FT8', 'FT4'];
 
 const PROXY_BASE = '';   // empty = same origin as the PWA
+const REGION_INDEX_BY_KEY = REGION_KEYS.reduce((acc, key, idx) => {
+  acc[key] = idx;
+  return acc;
+}, {});
 
 const SEG_COLORS = {
   live: ['#00d250','#00d250','#00d250','#00d250','#00d250','#00d250','#00d250','#00d250','#00d250',
@@ -41,6 +46,9 @@ const SEG_COLORS = {
   peak: ['#005a22','#005a22','#005a22','#005a22','#005a22','#005a22','#005a22','#005a22','#005a22',
          '#645500','#645500','#645500','#723c00','#641212','#641212'],
 };
+
+let pskByRegion = {};
+let pskMeta = { age: null, cached: false, stale: false };
 
 // ── Mode normalisation ────────────────────────────────────────────────────────
 function normaliseMode(raw) {
@@ -127,6 +135,86 @@ function snrToSUnit(snr) {
   return 'S9+30';
 }
 
+function median(nums) {
+  if (!nums || nums.length === 0) return null;
+  const sorted = nums.slice().sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function qualityColorForSnr(snr) {
+  if (snr == null) return null;
+  const frac = Math.max(0, Math.min(snr / MAX_SNR, 1));
+  if (frac < 0.60) return '#00d250';
+  if (frac < 0.80) return '#e6c800';
+  if (frac < 0.90) return '#ff8c00';
+  return '#dc1e1e';
+}
+
+function qualityFractionForMode(modeKey, snr) {
+  if (snr == null || Number.isNaN(snr)) return 0;
+  if (modeKey === 'FTx') {
+    // PSK-derived FTx quality is weak-signal centric; map roughly -20..+20 dB to 0..100%.
+    const minDb = -20;
+    const maxDb = 20;
+    return Math.max(0, Math.min((snr - minDb) / (maxDb - minDb), 1));
+  }
+  // CW/RTTY/SSB use the same 0..50 dB scale as the main S-meter.
+  return Math.max(0, Math.min(snr / MAX_SNR, 1));
+}
+
+function ftxSnrToRbnScale(ftxSnr) {
+  if (ftxSnr == null || Number.isNaN(ftxSnr)) return null;
+  // PSK FTx values are normalized (+7 dB) but still represent digital weak-signal behavior.
+  // Map -20..+20 dB to a conservative 2..22 dB contribution on the main 0..50 RBN meter.
+  const minDb = -20;
+  const maxDb = 20;
+  const frac = Math.max(0, Math.min((ftxSnr - minDb) / (maxDb - minDb), 1));
+  return 2 + frac * 20;
+}
+
+function regionKeyForIndex(idx) {
+  return REGION_KEYS[idx] || REGION_KEYS[0];
+}
+
+function createModeSampleCube() {
+  return Array.from({ length: REGIONS.length }, () =>
+    Array.from({ length: BANDS.length }, () => ({ CW: [], RTTY: [], FT8: [], FT4: [] }))
+  );
+}
+
+function createModeQualityCube() {
+  return Array.from({ length: REGIONS.length }, () =>
+    Array.from({ length: BANDS.length }, () => ({
+      CW: null, RTTY: null, FT8: null, FT4: null, FTx: null, SSB: null,
+    }))
+  );
+}
+
+function addModeSample(modeCube, regionIdx, bandIdx, rawMode, snr) {
+  const nm = normaliseMode(rawMode);
+  if (!KNOWN_MODES.includes(nm)) return;
+  modeCube[regionIdx][bandIdx][nm].push(snr);
+}
+
+function collapseModeSamples(modeCube, meterState) {
+  const out = createModeQualityCube();
+  for (let ri = 0; ri < REGIONS.length; ri++) {
+    for (let bi = 0; bi < BANDS.length; bi++) {
+      const bucket = modeCube[ri][bi];
+      const ftAll = bucket.FT8.concat(bucket.FT4);
+      out[ri][bi].CW = median(bucket.CW);
+      out[ri][bi].RTTY = median(bucket.RTTY);
+      out[ri][bi].FT8 = median(bucket.FT8);
+      out[ri][bi].FT4 = median(bucket.FT4);
+      out[ri][bi].FTx = median(ftAll);
+      out[ri][bi].SSB = (meterState[ri].hasValue[bi] && meterState[ri].ema[bi] >= SSB_SNR_THRESHOLD)
+        ? Math.round(meterState[ri].ema[bi] * 10) / 10
+        : null;
+    }
+  }
+  return out;
+}
+
 // ── Region classifier ─────────────────────────────────────────────────────────
 const PREFIX_TABLE = [
   ['W1',0],['W2',0],['W3',0],['W4',0],['W8',0],['W9',0],
@@ -198,6 +286,10 @@ function regionFromLatLon(lat, lon) {
   if (lat >= -10 && lat <= 75 && lon >= 45)                return 6;
   if (lat <= 0   && lon >= 100)                            return 7;
   return 0;
+}
+
+function regionKeyFromLatLon(lat, lon) {
+  return regionKeyForIndex(regionFromLatLon(lat, lon));
 }
 
 // ── Spotter cache ─────────────────────────────────────────────────────────────
@@ -403,37 +495,70 @@ function drawBar(canvas, hasData, snr, peak) {
 
 // ── Mode row builder ──────────────────────────────────────────────────────────
 // Abbreviated labels to fit narrow panel columns
-const MODE_ABBREV = { CW: 'CW', RTTY: 'RY', FT8: 'FTx', FT4: 'FTx', SSB: 'SSB' };
-
-// Display slots: CW, RY (RTTY), FTx (FT8+FT4), SSB
+// Display slots: CW, SSB, RY (RTTY), FTx (FT8+FT4)
 const DISPLAY_MODES = [
   { abbr: 'CW',  sources: ['CW'],        isSSB: false },
+  { abbr: 'SSB', sources: ['SSB'],       isSSB: true  },
   { abbr: 'RY',  sources: ['RTTY'],      isSSB: false },
   { abbr: 'FTx', sources: ['FT8','FT4'], isSSB: false },
-  { abbr: 'SSB', sources: ['SSB'],       isSSB: true  },
 ];
+const MODE_QUALITY_KEY = { CW: 'CW', RY: 'RTTY', FTx: 'FTx', SSB: 'SSB' };
+const MODE_QUALITY_COLORS = ['#00d250', '#e6c800', '#ff8c00', '#dc1e1e'];
 
-function buildModeRow(el, hasData, activeModes) {
+function buildQualityTrack(frac, enabled) {
+  const track = document.createElement('span');
+  track.className = 'mode-quality-track';
+  for (let i = 0; i < 4; i++) {
+    const seg = document.createElement('span');
+    seg.className = 'mode-quality-seg';
+    const fillEl = document.createElement('span');
+    fillEl.className = 'mode-quality-fill';
+    let fill = 0;
+    if (enabled && frac > 0) {
+      const start = i * 0.25;
+      const end = start + 0.25;
+      if (frac >= end) fill = 1;
+      else if (frac > start) fill = (frac - start) / 0.25;
+    }
+    const fillPct = Math.round(fill * 100);
+    const c = MODE_QUALITY_COLORS[i];
+    fillEl.style.width = `${fillPct}%`;
+    fillEl.style.backgroundColor = c;
+    seg.appendChild(fillEl);
+    track.appendChild(seg);
+  }
+  return track;
+}
+
+function buildModeRow(el, hasData, activeModes, modeSnr = {}) {
   el.innerHTML = '';
   DISPLAY_MODES.forEach(({ abbr, sources, isSSB }) => {
     const span   = document.createElement('span');
     const active = sources.some(s => activeModes.has(s));
+    const txt = document.createElement('span');
+    txt.className = 'mode-label-text';
+    const qKey = MODE_QUALITY_KEY[abbr];
+    const qSnr = modeSnr[qKey] ?? null;
+    const frac = qualityFractionForMode(qKey, qSnr);
+    const qTrack = buildQualityTrack(frac, hasData && active);
     if (!hasData) {
       span.className   = 'mode-label mode-dim';
-      span.textContent = abbr;
+      txt.textContent = abbr;
     } else if (active && isSSB) {
       span.className   = 'mode-label mode-ssb';
-      span.textContent = '\u2713' + abbr;
+      txt.textContent = '\u2713' + abbr;
     } else if (active) {
       span.className   = 'mode-label mode-active';
-      span.textContent = '\u2713' + abbr;
+      txt.textContent = '\u2713' + abbr;
     } else if (isSSB) {
       span.className   = 'mode-label mode-dim';
-      span.textContent = abbr;
+      txt.textContent = abbr;
     } else {
       span.className   = 'mode-label mode-absent';
-      span.textContent = '\u2717' + abbr;
+      txt.textContent = '\u2717' + abbr;
     }
+    span.appendChild(qTrack);
+    span.appendChild(txt);
     el.appendChild(span);
   });
 }
@@ -649,7 +774,7 @@ function buildPanels() {
 }
 
 // ── Refresh both layouts ──────────────────────────────────────────────────────
-function refreshUI() {
+function refreshUI(modeQualityByBand = null) {
   meters.forEach((m, ri) => {
     BANDS.forEach((_, bi) => {
       const hasData = m.hasValue[bi];
@@ -690,10 +815,13 @@ function refreshUI() {
       }
 
       // Per-band mode rows
-      const bModes   = m.activeModes(bi);
-      const bHasData = m.hasValue[bi];
-      if (deskModeRows[ri]?.[bi]) buildModeRow(deskModeRows[ri][bi], bHasData, bModes);
-      if (accModeRows[ri]?.[bi])  buildModeRow(accModeRows[ri][bi],  bHasData, bModes);
+      const bModes = m.activeModes(bi);
+      const q = modeQualityByBand?.[ri]?.[bi] || {};
+      // Let PSKReporter drive FTx activity even when RBN has no digital spots.
+      if (q.FTx != null) bModes.add('FT8');
+      const bHasData = m.hasValue[bi] || q.FTx != null;
+      if (deskModeRows[ri]?.[bi]) buildModeRow(deskModeRows[ri][bi], bHasData, bModes, q);
+      if (accModeRows[ri]?.[bi])  buildModeRow(accModeRows[ri][bi],  bHasData, bModes, q);
     });
 
     const txt = m.hasAnyData ? `${m.totalSpots} spots` : 'no data';
@@ -711,6 +839,22 @@ let skimmerCount = 0;
 function bandForFreq(khz) {
   const i = BANDS.findIndex(b => khz >= b.min && khz <= b.max);
   return i >= 0 ? i : -1;
+}
+
+async function fetchPsk() {
+  try {
+    const resp = await fetch(PROXY_BASE + '/psk', { signal: AbortSignal.timeout(25000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    pskByRegion = data?.byRegion && typeof data.byRegion === 'object' ? data.byRegion : {};
+    pskMeta = {
+      age: typeof data?.age === 'number' ? data.age : null,
+      cached: !!data?.cached,
+      stale: !!data?.stale,
+    };
+  } catch {
+    // Keep previous PSK snapshot on transient failures.
+  }
 }
 
 async function pollOnce() {
@@ -743,6 +887,7 @@ async function pollOnce() {
   const pendingGrid = [];
   const sampled = Array.from({length: REGIONS.length}, () => new Uint8Array(BANDS.length));
   const regionSkimmers = new Set();
+  const modeSamples = createModeSampleCube();
 
   for (const [spotCall, spot] of Object.entries(data)) {
     if (!spot.lsn || typeof spot.lsn !== 'object') continue;
@@ -766,6 +911,7 @@ async function pollOnce() {
         spotsFromVantage++;
         if (dxRegion < 0) { spotsUnknown++; continue; }
         meters[dxRegion].addSample(bi, snr, spot.mode || '');
+        addModeSample(modeSamples, dxRegion, bi, spot.mode || '', snr);
         sampled[dxRegion][bi] = 1;
         spotsProcessed++;
       } else {
@@ -787,6 +933,7 @@ async function pollOnce() {
       spotsFromVantage++;
       if (dxRegion < 0) { spotsUnknown++; continue; }
       meters[dxRegion].addSample(bi, snr, spotMode);
+      addModeSample(modeSamples, dxRegion, bi, spotMode, snr);
       sampled[dxRegion][bi] = 1;
       spotsProcessed++;
     }
@@ -806,16 +953,38 @@ async function pollOnce() {
     updateSkimmerCount(skimmerCount, false);
   }
 
+  // Fetch PSKReporter aggregate in parallel with final UI composition.
+  await fetchPsk();
+
   // Decay bands that received no samples
   for (let ri = 0; ri < REGIONS.length; ri++)
     for (let bi = 0; bi < BANDS.length; bi++)
       if (!sampled[ri][bi]) meters[ri].decayBand(bi);
 
-  refreshUI();
+  const modeQualityByBand = collapseModeSamples(modeSamples, meters);
+
+  // Overlay FTx quality from PSKReporter by from/to region + band.
+  const fromKey = mode === 'region'
+    ? regionKeyForIndex(vantageRegion)
+    : (gridLL ? regionKeyForIndex(regionFromLatLon(gridLL.lat, gridLL.lon)) : null);
+  if (fromKey && pskByRegion[fromKey]) {
+    for (let ri = 0; ri < REGIONS.length; ri++) {
+      const toKey = regionKeyForIndex(ri);
+      for (let bi = 0; bi < BANDS.length; bi++) {
+        const pskEntry = pskByRegion[fromKey]?.[toKey]?.[BANDS[bi].label];
+        if (pskEntry && typeof pskEntry.snr === 'number') {
+          modeQualityByBand[ri][bi].FTx = pskEntry.snr;
+        }
+      }
+    }
+  }
+
+  refreshUI(modeQualityByBand);
 
   const ts = new Date().toLocaleTimeString();
+  const pskInfo = pskMeta.age == null ? 'psk=na' : `psk=${pskMeta.age}s${pskMeta.stale ? ' stale' : ''}`;
   setStatus(
-    `Poll ${ts}  |  spots=${totalSpots}  vantage=${spotsFromVantage}  mapped=${spotsProcessed}  unk=${spotsUnknown}`,
+    `Poll ${ts}  |  spots=${totalSpots}  vantage=${spotsFromVantage}  mapped=${spotsProcessed}  unk=${spotsUnknown}  ${pskInfo}`,
     spotsProcessed > 0 ? 'ok' : 'warn'
   );
 }

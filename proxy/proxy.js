@@ -7,8 +7,36 @@ const url   = require('url');
 const PORT = process.env.PORT || 3001;
 
 const SPOT_KEEP_MS  = 2 * 60 * 1000;
+const PSK_CACHE_MS  = parseInt(process.env.PSK_CACHE_MS || String(15 * 60 * 1000), 10);
+const PSK_URL_BASE  = 'https://retrieve.pskreporter.info/query';
+const PSK_FLOW_SEC  = parseInt(process.env.PSK_FLOW_SECONDS || '1800', 10);
+const PSK_CONTACT   = process.env.PSK_APP_CONTACT || 'gerry@remote.radio';
+const PSK_MODES     = (process.env.PSK_MODES || 'FT8')
+  .split(',')
+  .map(s => s.trim().toUpperCase())
+  .filter(Boolean);
+const PSK_COOLDOWN_MS = parseInt(process.env.PSK_COOLDOWN_MS || String(30 * 60 * 1000), 10);
 
 const spotMap = new Map();
+const REGION_KEYS = ['ENA', 'CNA', 'WNA', 'SA', 'EU', 'AF', 'AS', 'OC'];
+const BANDS = [
+  { label: '160m', min: 1800,  max: 2000  },
+  { label: '80m',  min: 3500,  max: 4000  },
+  { label: '40m',  min: 7000,  max: 7300  },
+  { label: '30m',  min: 10100, max: 10150 },
+  { label: '20m',  min: 14000, max: 14350 },
+  { label: '17m',  min: 18068, max: 18168 },
+  { label: '15m',  min: 21000, max: 21450 },
+  { label: '12m',  min: 24890, max: 24990 },
+  { label: '10m',  min: 28000, max: 29700 },
+  { label: '6m',   min: 50000, max: 54000 },
+];
+
+let pskCacheData     = null;
+let pskCacheFetched  = 0;
+let pskFetchPromise  = null;
+let pskBlockedUntil  = 0;
+let pskLastError     = null;
 
 function pruneSpots() {
   const cutoff = Date.now() - SPOT_KEEP_MS;
@@ -99,12 +127,12 @@ function send(res, status, contentType, body) {
   res.end(body);
 }
 
-function fetchRaw(targetUrl, timeoutMs = 8000) {
+function fetchRaw(targetUrl, timeoutMs = 8000, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
     const parsed = url.parse(targetUrl);
     const req = https.request(
       { hostname: parsed.hostname, path: parsed.path, method: 'GET',
-        headers: { 'User-Agent': 'RbnSMeter-Proxy/1.0' }, timeout: timeoutMs },
+        headers: { 'User-Agent': 'RbnSMeter-Proxy/1.0', ...extraHeaders }, timeout: timeoutMs },
       upstream => {
         const chunks = [];
         upstream.on('data', c => chunks.push(c));
@@ -144,6 +172,225 @@ function parseWWV(text) {
     a:   m(/planetary A-index\s+(\d+)/i),
     k:   m(/K-index at \d+\s+UTC[^.]+was\s+([\d.]+)/i),
   };
+}
+
+function median(nums) {
+  if (!nums || nums.length === 0) return null;
+  const sorted = nums.slice().sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function gridToLatLon(grid) {
+  if (!grid || grid.length < 4) return null;
+  const g = grid.toUpperCase();
+  const f1 = g.charCodeAt(0) - 65;
+  const f2 = g.charCodeAt(1) - 65;
+  const s1 = parseInt(g[2], 10);
+  const s2 = parseInt(g[3], 10);
+  if (f1 < 0 || f1 > 17 || f2 < 0 || f2 > 17 || Number.isNaN(s1) || Number.isNaN(s2)) return null;
+
+  let lon = f1 * 20 - 180 + s1 * 2 + 1;
+  let lat = f2 * 10 - 90 + s2 + 0.5;
+  if (g.length >= 6) {
+    const ss1 = g.charCodeAt(4) - 65;
+    const ss2 = g.charCodeAt(5) - 65;
+    if (ss1 >= 0 && ss1 < 24 && ss2 >= 0 && ss2 < 24) {
+      lon = f1 * 20 - 180 + s1 * 2 + ss1 * (2 / 24) + 1 / 24;
+      lat = f2 * 10 - 90 + s2 + ss2 * (1 / 24) + 0.5 / 24;
+    }
+  }
+  return { lat, lon };
+}
+
+function regionFromLatLon(lat, lon) {
+  if (lat > 15 && lon >= -170 && lon <= -50) {
+    if (lon >= -85)  return 'ENA';
+    if (lon >= -105) return 'CNA';
+    return 'WNA';
+  }
+  if (lat >= -60 && lat <= 15 && lon >= -82 && lon <= -34) return 'SA';
+  if (lat >= 35  && lat <= 72 && lon >= -12 && lon <= 45)  return 'EU';
+  if (lat >= -35 && lat <= 40 && lon >= -20 && lon <= 55)  return 'AF';
+  if (lat >= -10 && lat <= 75 && lon >= 45)                return 'AS';
+  if (lat <= 0   && lon >= 100)                            return 'OC';
+  return 'ENA';
+}
+
+function bandForFrequencyKhz(freqKhz) {
+  for (const band of BANDS) {
+    if (freqKhz >= band.min && freqKhz <= band.max) return band.label;
+  }
+  return null;
+}
+
+function parseAttributes(attrString) {
+  const attrs = {};
+  let m;
+  const re = /([A-Za-z][A-Za-z0-9]*)="([^"]*)"/g;
+  while ((m = re.exec(attrString)) !== null) attrs[m[1]] = m[2];
+  return attrs;
+}
+
+function parsePskReports(xmlText) {
+  const reports = [];
+  if (!xmlText || typeof xmlText !== 'string') return reports;
+  let m;
+  const rr = /<receptionReport\b([^>]*?)\/?>/gi;
+  while ((m = rr.exec(xmlText)) !== null) {
+    const attrs = parseAttributes(m[1]);
+    const rxGrid = attrs.receiverLocator || attrs.receiverlocator || attrs.rxLocator || '';
+    const txGrid = attrs.senderLocator   || attrs.senderlocator   || attrs.txLocator || '';
+    const snrRaw = attrs.sNR || attrs.SNR || attrs.snr;
+    const freqRaw = attrs.frequency || attrs.freq;
+    const snr = parseFloat(snrRaw);
+    const freq = parseFloat(freqRaw);
+    if (!rxGrid || !txGrid || Number.isNaN(snr) || Number.isNaN(freq)) continue;
+    reports.push({ rxGrid, txGrid, snr, freq });
+  }
+  return reports;
+}
+
+function foldPskReports(reports) {
+  const bySample = {};
+  for (const r of reports) {
+    const rxLL = gridToLatLon(r.rxGrid);
+    const txLL = gridToLatLon(r.txGrid);
+    if (!rxLL || !txLL) continue;
+    const fromRegion = regionFromLatLon(rxLL.lat, rxLL.lon);
+    const toRegion = regionFromLatLon(txLL.lat, txLL.lon);
+    if (!REGION_KEYS.includes(fromRegion) || !REGION_KEYS.includes(toRegion)) continue;
+
+    const freqKhz = r.freq >= 100000 ? r.freq / 1000 : r.freq;
+    const band = bandForFrequencyKhz(freqKhz);
+    if (!band) continue;
+
+    const correctedSnr = r.snr + 7.0; // 2500Hz -> ~500Hz bandwidth normalization
+    bySample[fromRegion] ??= {};
+    bySample[fromRegion][toRegion] ??= {};
+    bySample[fromRegion][toRegion][band] ??= [];
+    bySample[fromRegion][toRegion][band].push(correctedSnr);
+  }
+
+  const out = {};
+  for (const [fromRegion, toMap] of Object.entries(bySample)) {
+    out[fromRegion] = {};
+    for (const [toRegion, bandMap] of Object.entries(toMap)) {
+      out[fromRegion][toRegion] = {};
+      for (const [band, snrValues] of Object.entries(bandMap)) {
+        const snr = median(snrValues);
+        if (snr == null) continue;
+        out[fromRegion][toRegion][band] = { snr: Math.round(snr * 10) / 10, count: snrValues.length };
+      }
+    }
+  }
+  return out;
+}
+
+async function fetchPskMode(mode) {
+  const query = `${PSK_URL_BASE}?rronly=1&flowStartSeconds=-${PSK_FLOW_SEC}&nolocator=0&mode=${encodeURIComponent(mode)}&appcontact=${encodeURIComponent(PSK_CONTACT)}`;
+  const browserLikeHeaders = {
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'application/xml,text/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Connection': 'close',
+  };
+
+  const raw = await fetchRaw(query, 30000, browserLikeHeaders);
+  if (/too many queries|made too many queries/i.test(raw)) {
+    const e = new Error('psk_rate_limited');
+    e.code = 'PSK_RATE_LIMIT';
+    throw e;
+  }
+  if (/just a moment|attention required|cloudflare/i.test(raw) && !/<receptionReport\b/i.test(raw)) {
+    const e = new Error('psk_challenge');
+    e.code = 'PSK_RATE_LIMIT';
+    throw e;
+  }
+  const reports = parsePskReports(raw);
+  return reports;
+}
+
+async function servePsk(res) {
+  const now = Date.now();
+  if (pskCacheData && (now - pskCacheFetched) < PSK_CACHE_MS) {
+    send(res, 200, 'application/json', JSON.stringify({
+      age: Math.round((now - pskCacheFetched) / 1000),
+      fetchedAt: new Date(pskCacheFetched).toISOString(),
+      byRegion: pskCacheData,
+      cached: true,
+    }));
+    return;
+  }
+  if (now < pskBlockedUntil) {
+    const retryIn = Math.max(0, Math.round((pskBlockedUntil - now) / 1000));
+    if (pskCacheData) {
+      send(res, 200, 'application/json', JSON.stringify({
+        age: Math.round((now - pskCacheFetched) / 1000),
+        fetchedAt: new Date(pskCacheFetched).toISOString(),
+        byRegion: pskCacheData,
+        cached: true,
+        stale: true,
+        retryIn,
+        error: pskLastError || 'psk_throttled',
+      }));
+      return;
+    }
+    send(res, 429, 'application/json', JSON.stringify({
+      error: pskLastError || 'psk_throttled',
+      retryIn,
+    }));
+    return;
+  }
+
+  if (!pskFetchPromise) {
+    pskFetchPromise = (async () => {
+      const modeFetches = await Promise.allSettled(PSK_MODES.map(fetchPskMode));
+      const reports = [];
+      for (const mr of modeFetches) {
+        if (mr.status === 'fulfilled') reports.push(...mr.value);
+      }
+      const hardErrors = modeFetches
+        .filter(mr => mr.status === 'rejected')
+        .map(mr => mr.reason?.code || mr.reason?.message || 'psk_mode_error');
+      if (reports.length === 0) throw new Error('no_psk_reports');
+      pskCacheData = foldPskReports(reports);
+      pskCacheFetched = Date.now();
+      pskLastError = null;
+      pskBlockedUntil = 0;
+      if (hardErrors.length > 0) {
+        console.warn('[psk] partial fetch errors:', hardErrors.join(','));
+      }
+      return pskCacheData;
+    })().finally(() => { pskFetchPromise = null; });
+  }
+
+  try {
+    const byRegion = await pskFetchPromise;
+    send(res, 200, 'application/json', JSON.stringify({
+      age: Math.round((Date.now() - pskCacheFetched) / 1000),
+      fetchedAt: new Date(pskCacheFetched).toISOString(),
+      byRegion,
+      cached: false,
+    }));
+  } catch (e) {
+    if (pskCacheData) {
+      send(res, 200, 'application/json', JSON.stringify({
+        age: Math.round((Date.now() - pskCacheFetched) / 1000),
+        fetchedAt: new Date(pskCacheFetched).toISOString(),
+        byRegion: pskCacheData,
+        cached: true,
+        stale: true,
+      }));
+      return;
+    }
+    pskLastError = e?.code || e?.message || 'psk_fetch_error';
+    pskBlockedUntil = Date.now() + PSK_COOLDOWN_MS;
+    send(res, 502, 'application/json', JSON.stringify({
+      error: 'PSK fetch error',
+      reason: pskLastError,
+      retryIn: Math.round(PSK_COOLDOWN_MS / 1000),
+    }));
+  }
 }
 
 async function serveSolar(res) {
@@ -237,11 +484,18 @@ const server = http.createServer(async (req, res) => {
     try { await serveSolar(res); } catch (_) { send(res, 502, 'text/plain', 'Solar fetch error'); }
     return;
   }
+  if (parts[0] === 'psk' && parts.length === 1) {
+    try { await servePsk(res); } catch (_) { send(res, 502, 'text/plain', 'PSK fetch error'); }
+    return;
+  }
   if (parts[0] === 'health') {
     send(res, 200, 'application/json', JSON.stringify({
       status: 'ok', telnet: telnetReady,
       feed: feedWs ? feedWs.readyState === 1 : false,
       spots: spotMap.size,
+      pskAge: pskCacheFetched ? Math.round((Date.now() - pskCacheFetched) / 1000) : null,
+      pskRetryIn: pskBlockedUntil > Date.now() ? Math.round((pskBlockedUntil - Date.now()) / 1000) : 0,
+      pskModes: PSK_MODES,
     }));
     return;
   }

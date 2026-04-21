@@ -1,16 +1,18 @@
 'use strict';
 
 /**
- * RBN S-Meter Badge API
+ * HFSignals.live Badge API
  *
  * Endpoints:
  *   GET /badge/region?from=NA&to=EU&band=20m&theme=dark|light&size=small|full
  *   GET /badge/grid?grid=FN42&radius=500&to=EU&band=20m&theme=dark|light&size=small|full
+ *   GET /hfsignals/region?from=NA&to=EU&band=20m&theme=dark|light&size=small|full
+ *   GET /hfsignals/grid?grid=FN42&radius=500&to=EU&band=20m&theme=dark|light&size=small|full
  *
  * Returns a PNG image suitable for embedding in web pages via <img> tags.
  *
  * Caching:
- *   - RBN data is fetched once and shared across all requests
+ *   - Spot data is fetched once and shared across all requests
  *   - Data is refreshed every 60 seconds
  *   - Rendered PNGs are cached per parameter set for up to 10 minutes
  *   - Images older than 30 minutes are deleted
@@ -26,11 +28,11 @@ const url     = require('url');
 const { createCanvas } = require('canvas');
 
 const PORT         = process.env.PORT || 3002;
-const DATA_TTL_MS  = 60  * 1000;   // re-fetch RBN data every 60s
+const DATA_TTL_MS  = 60  * 1000;   // re-fetch spot data every 60s
 const CACHE_TTL_MS = 10  * 60 * 1000;  // reuse rendered PNG for 10 min
 const MAX_AGE_MS   = 30  * 60 * 1000;  // delete cached images older than 30 min
 
-// Use the internal proxy which has live RBN telnet feed data
+// Use the internal proxy which has live spot feed data
 const RBN_URL = process.env.RBN_PROXY_URL || 'http://rbn-smeter:3001/rbn';
 
 // ── Shared RBN data state ─────────────────────────────────────────────────────
@@ -56,8 +58,11 @@ const BANDS = [
   { label: '160m', min: 1800,  max: 2000  },
   { label: '80m',  min: 3500,  max: 4000  },
   { label: '40m',  min: 7000,  max: 7300  },
+  { label: '30m',  min: 10100, max: 10150 },
   { label: '20m',  min: 14000, max: 14350 },
+  { label: '17m',  min: 18068, max: 18168 },
   { label: '15m',  min: 21000, max: 21450 },
+  { label: '12m',  min: 24890, max: 24990 },
   { label: '10m',  min: 28000, max: 29700 },
   { label: '6m',   min: 50000, max: 54000 },
 ];
@@ -210,7 +215,7 @@ function normMode(raw) {
 function fetchRbn() {
   const transport = RBN_URL.startsWith('https') ? https : http;
   return new Promise((resolve, reject) => {
-    const req = transport.request(RBN_URL, { headers: { 'User-Agent': 'RbnSMeter-Badge/1.0' }, timeout: 12000 }, res => {
+    const req = transport.request(RBN_URL, { headers: { 'User-Agent': 'hfsignals-badge/1.0' }, timeout: 12000 }, res => {
       const chunks = [];
       res.on('data', c => chunks.push(c));
       res.on('end', () => {
@@ -344,9 +349,9 @@ const THEMES = {
 function segColor(i, bright, t) {
   const frac = (i+1)/15;
   if (bright) {
+    // Tri-color to match the main PWA S-meter thresholds.
     if (frac < 0.60) return t.green;
     if (frac < 0.80) return t.yellow;
-    if (frac < 0.90) return t.orange;
     return t.red;
   }
   // Peak hold — dimmed versions
@@ -465,7 +470,7 @@ function drawBadgePanel(ctx, { snr, modes, hasData, fromLabel, toLabel, bandLabe
   ctx.font         = `${small ? 6 : 7}px "DejaVu Sans Mono"`;
   ctx.textAlign    = 'right';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText(`RBN S-Meter by W1VE · ${ageStr}`, x + W - 3, y + H - 2);
+  ctx.fillText(`hfsignals.live by W1VE · ${ageStr}`, x + W - 3, y + H - 2);
 }
 
 // ── Mode badges row — same colour scheme as the PWA ───────────────────────────
@@ -574,13 +579,13 @@ function renderWarmup(theme, size) {
   ctx.fillStyle = t.accent;
   ctx.font = `bold ${size === 'small' ? 8 : 10}px "DejaVu Sans Mono"`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('RBN S-METER', W/2, size === 'small' ? 7 : 10);
+  ctx.fillText('HFSIGNALS.LIVE', W/2, size === 'small' ? 7 : 10);
   ctx.fillStyle = t.textDim; ctx.font = '9px "DejaVu Sans Mono"';
   ctx.textBaseline = 'middle';
   ctx.fillText('Warming up... retry in ~30s', W/2, H/2 + 4);
   ctx.fillStyle = t.textDim; ctx.font = '6px "DejaVu Sans Mono"';
   ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
-  ctx.fillText('RBN S-Meter by W1VE', W-3, H-2);
+  ctx.fillText('hfsignals.live by W1VE', W-3, H-2);
   return canvas.toBuffer('image/png');
 }
 
@@ -608,9 +613,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (pathname !== '/badge/region' && pathname !== '/badge/grid') {
+  const isRegionPath = pathname === '/badge/region' || pathname === '/hfsignals/region';
+  const isGridPath   = pathname === '/badge/grid' || pathname === '/hfsignals/grid';
+  if (!isRegionPath && !isGridPath) {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
-    res.end('Not found. Use /badge/region or /badge/grid');
+    res.end('Not found. Use /badge/region, /badge/grid, /hfsignals/region, or /hfsignals/grid');
     return;
   }
 
@@ -629,7 +636,7 @@ const server = http.createServer(async (req, res) => {
 
   let fromKey, toKey, cacheKey;
 
-  if (pathname === '/badge/region') {
+  if (isRegionPath) {
     const fromRaw = (q.from || 'ENA').toUpperCase();
     const toRaw   = (q.to   || 'EU' ).toUpperCase();
     fromKey       = REGION_ALIASES[fromRaw];
@@ -680,13 +687,13 @@ const server = http.createServer(async (req, res) => {
 
   // ── All-bands path ─────────────────────────────────────────────────────────
   if (isAllBands) {
-    const fromLabel = pathname === '/badge/region'
+    const fromLabel = isRegionPath
       ? (REGIONS.find(r => r.key === fromKey)?.label || fromKey)
       : `Grid ${q.grid?.toUpperCase()}`;
     const toLabel = REGIONS.find(r => r.key === toKey)?.label || toKey;
 
     const allResults = BANDS.map(b => {
-      if (pathname === '/badge/region') {
+      if (isRegionPath) {
         return computeRegionBand(data, fromKey, toKey, b.label);
       } else {
         const grid   = (q.grid || '').toUpperCase();
@@ -703,7 +710,7 @@ const server = http.createServer(async (req, res) => {
 
   // ── Single-band path ───────────────────────────────────────────────────────
   let result;
-  if (pathname === '/badge/region') {
+  if (isRegionPath) {
     result = computeRegionBand(data, fromKey, toKey, band);
   } else {
     const grid   = (q.grid || '').toUpperCase();
@@ -712,7 +719,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Get display labels
-  const fromLabel = pathname === '/badge/region'
+  const fromLabel = isRegionPath
     ? (REGIONS.find(r => r.key === fromKey)?.label || fromKey)
     : `Grid ${q.grid?.toUpperCase()}`;
   const toLabel = REGIONS.find(r => r.key === toKey)?.label || toKey;
@@ -740,14 +747,14 @@ function sendPng(res, png, ageMs, warming) {
     'Content-Length':            png.length,
     'Cache-Control':             'public, max-age=60',
     'Access-Control-Allow-Origin': '*',
-    'X-RBN-Status':              warming ? 'warming' : 'live',
-    'X-RBN-Cache-Age':           Math.round(ageMs / 1000),
+    'X-HFSIGNALS-Status':        warming ? 'warming' : 'live',
+    'X-HFSIGNALS-Cache-Age':     Math.round(ageMs / 1000),
   });
   res.end(png);
 }
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`RBN Badge API listening on 0.0.0.0:${PORT}`);
+  console.log(`hfsignals badge API listening on 0.0.0.0:${PORT}`);
   // Pre-fetch data on startup
   getRbnData().then(() => console.log('Initial RBN data fetched.'));
 });
