@@ -1211,6 +1211,9 @@ let pollTimer    = null;
 let isRunning    = false;
 let geoWatchId   = null;
 let skimmerCount = 0;
+let pollInFlight = false;
+let pollPending = false;
+let refreshDebounceTimer = null;
 
 function bandForFreq(khz) {
   const i = BANDS.findIndex(b => khz >= b.min && khz <= b.max);
@@ -1234,6 +1237,14 @@ async function fetchPsk() {
 }
 
 async function pollOnce() {
+  if (!isRunning) return;
+  if (pollInFlight) {
+    pollPending = true;
+    return;
+  }
+  pollInFlight = true;
+
+  try {
   const mode = document.querySelector('input[name="vantage-mode"]:checked').value;
 
   // Clear per-cycle mode sets
@@ -1363,43 +1374,33 @@ async function pollOnce() {
     `Poll ${ts}  |  spots=${totalSpots}  vantage=${spotsFromVantage}  mapped=${spotsProcessed}  unk=${spotsUnknown}  ${pskInfo}`,
     spotsProcessed > 0 ? 'ok' : 'warn'
   );
+  } finally {
+    pollInFlight = false;
+    if (pollPending) {
+      pollPending = false;
+      queueMicrotask(() => pollOnce());
+    }
+  }
 }
 
 function startPolling() {
   if (isRunning) return;
-  const mode = document.querySelector('input[name="vantage-mode"]:checked').value;
-  if (mode === 'grid') {
-    const g = document.getElementById('grid-input').value.trim();
-    if (!isValidGrid(g)) {
-      setStatus('Please enter a valid grid square before starting.', 'error');
-      return;
-    }
-  }
   isRunning = true;
-  document.getElementById('btn-start').disabled = true;
-  document.getElementById('btn-stop').disabled  = false;
-  setStatus('Polling started — waiting for first data…', 'ok');
+  setStatus('Auto polling started.', 'ok');
   saveSettings();
   pollOnce();
-  pollTimer = setInterval(pollOnce, POLL_MS);
+  pollTimer = setInterval(() => pollOnce(), POLL_MS);
 }
 
-function stopPolling() {
-  isRunning = false;
-  clearInterval(pollTimer);
-  pollTimer = null;
-  document.getElementById('btn-start').disabled = false;
-  document.getElementById('btn-stop').disabled  = true;
-  setStatus('Polling stopped.', 'warn');
-}
-
-function resetMeters() {
-  meters.forEach(m => m.reset());
-  skimmerCount = 0;
-  const resetEl = document.getElementById('skimmer-count');
-  if (resetEl) { resetEl.textContent = ''; resetEl.className = 'skimmer-count'; }
-  refreshUI();
-  setStatus('Meters reset.', 'warn');
+function scheduleRefresh(delayMs = 150) {
+  if (!isRunning) return;
+  if (refreshDebounceTimer) clearTimeout(refreshDebounceTimer);
+  refreshDebounceTimer = setTimeout(async () => {
+    refreshDebounceTimer = null;
+    meters.forEach(m => m.reset());
+    skimmerCount = 0;
+    await pollOnce();
+  }, delayMs);
 }
 
 function setStatus(msg, cls = '') {
@@ -1409,15 +1410,14 @@ function setStatus(msg, cls = '') {
 }
 
 // ── Skimmer count display ─────────────────────────────────────────────────────
-function updateSkimmerCount(n, isGrid) {
+function updateSkimmerCount(n, _isGrid) {
   const el = document.getElementById('skimmer-count');
   if (!el) return;
   if (n === 0) {
-    // In grid mode with no hits, warn the user; in region mode just clear
-    el.textContent = isGrid ? 'no skimmers' : '';
-    el.className   = isGrid ? 'skimmer-count skimmer-none' : 'skimmer-count';
+    el.textContent = 'no skimmers';
+    el.className   = 'skimmer-count skimmer-none';
   } else {
-    el.textContent = n === 1 ? '1 skimmer' : `${n} skimmers`;
+    el.textContent = n === 1 ? '1 skimmer in query' : `${n} skimmers in query`;
     el.className   = n < 3 ? 'skimmer-count skimmer-few' : 'skimmer-count skimmer-ok';
   }
 }
@@ -1494,7 +1494,7 @@ function startAutoUpdate() {
       if (newGrid.slice(0, 4) !== current) {
         document.getElementById('grid-input').value = newGrid;
         saveSettings();
-        if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
+        if (isRunning) scheduleRefresh(120);
       }
     },
     err => {
@@ -1574,9 +1574,7 @@ function updateModeUI(mode) {
   document.getElementById('radius-select').disabled  = !isGrid;
   document.getElementById('unit-toggle').disabled    = !isGrid;
 
-  // Skimmer count — always visible, dimmed when not in grid mode
-  const sc = document.getElementById('skimmer-count');
-  if (sc) sc.classList.remove('skimmer-disabled');
+  // Skimmer count always visible in vantage panel.
 
   // Auto-update — visible always; only enabled on mobile AND in grid mode
   const al = document.getElementById('autoupdate-label');
@@ -1604,8 +1602,9 @@ function applyLocation(lat, lon) {
   }
   if (grid && !document.getElementById('grid-input').value) {
     document.getElementById('grid-input').value = grid;
-    setStatus(`Location detected: ${grid} — press Start to begin.`, 'ok');
+    setStatus(`Location detected: ${grid}.`, 'ok');
     saveSettings();
+    scheduleRefresh(100);
   }
 }
 
@@ -1644,7 +1643,7 @@ document.addEventListener('DOMContentLoaded', () => {
     rb.addEventListener('change', () => {
       updateModeUI(rb.value);
       saveSettings();
-      if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
+      scheduleRefresh();
     });
   });
 
@@ -1652,13 +1651,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (unitPref === 'auto') updateRadiusLabels();
     updateVantageDisplay();
     saveSettings();
-    if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
+    scheduleRefresh();
   });
 
   document.getElementById('radius-select').addEventListener('change', () => {
     updateVantageDisplay();
     saveSettings();
-    if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
+    scheduleRefresh();
   });
 
   document.getElementById('unit-toggle').addEventListener('click', () => {
@@ -1667,7 +1666,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateRadiusLabels();
     updateVantageDisplay();
     saveSettings();
-    if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
+    scheduleRefresh();
   });
 
   const gi = document.getElementById('grid-input');
@@ -1683,7 +1682,7 @@ document.addEventListener('DOMContentLoaded', () => {
       setStatus(`'${g}' is not a valid Maidenhead grid square (e.g. FN42).`, 'error');
     } else {
       gi.style.borderColor = '';
-      if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
+      scheduleRefresh();
     }
   });
 
@@ -1695,10 +1694,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (e.target.checked) startAutoUpdate(); else stopAutoUpdate();
     });
   }
-
-  document.getElementById('btn-start').addEventListener('click', startPolling);
-  document.getElementById('btn-stop').addEventListener('click', stopPolling);
-  document.getElementById('btn-reset').addEventListener('click', resetMeters);
 
   // Keep vantage graphics crisp whenever viewport dimensions change.
   let resizeTimer = null;
@@ -1713,6 +1708,8 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(updateUTC, 1000);
   fetchSolar();
   setInterval(fetchSolar, 5 * 60 * 1000);
+
+  startPolling();
 });
 
 // ── Space weather + UTC ───────────────────────────────────────────────────────

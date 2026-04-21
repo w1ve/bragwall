@@ -93,39 +93,39 @@ h1 {
 .controls {
   background: var(--bg2);
   border-bottom: 1px solid rgba(0,212,170,0.25);
-  padding: 8px 12px;
+  padding: 11px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .vantage-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
 }
 
 .ctrl-label {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 22px;
   white-space: nowrap;
 }
 
 .radio-label {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 7px;
   cursor: pointer;
   color: var(--text);
-  font-size: 11px;
+  font-size: 22px;
   white-space: nowrap;
 }
 
 .radio-label input[type="radio"] {
   accent-color: var(--accent);
-  width: 14px;
-  height: 14px;
+  width: 24px;
+  height: 24px;
   cursor: pointer;
 }
 
@@ -133,10 +133,10 @@ h1 {
   background: var(--bg3);
   color: var(--text);
   border: 1px solid rgba(0,212,170,0.35);
-  border-radius: 3px;
-  padding: 3px 6px;
+  border-radius: 4px;
+  padding: 7px 10px;
   font-family: 'Share Tech Mono', monospace;
-  font-size: 11px;
+  font-size: 21px;
   outline: none;
   -webkit-appearance: none;
   appearance: none;
@@ -145,24 +145,24 @@ h1 {
 .ctrl-select:focus, .ctrl-input:focus { border-color: var(--accent); }
 .ctrl-select:disabled, .ctrl-input:disabled { opacity: 0.4; cursor: not-allowed; }
 
-#region-select { min-width: 130px; }
-#radius-select { min-width: 80px; }
-#grid-input    { width: 64px; text-transform: uppercase; }
+#region-select { min-width: 260px; }
+#radius-select { min-width: 165px; }
+#grid-input    { width: 132px; text-transform: uppercase; }
 
 .unit-toggle {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 11px;
+  font-size: 21px;
   font-weight: bold;
   background: var(--bg3);
   color: var(--accent);
   border: 1px solid rgba(0,212,170,0.4);
-  border-radius: 3px;
-  padding: 3px 7px;
+  border-radius: 4px;
+  padding: 7px 12px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
-  min-width: 28px;
+  min-width: 46px;
   text-align: center;
 }
 
@@ -172,13 +172,13 @@ h1 {
 /* ── Skimmer count label ─────────────────────────────────────────── */
 .skimmer-count {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 10px;
+  font-size: 17px;
   white-space: nowrap;
-  padding: 2px 6px;
+  padding: 4px 10px;
   border-radius: 3px;
   border: 1px solid rgba(0,212,170,0.25);
   background: rgba(0,212,170,0.07);
-  min-width: 72px;
+  min-width: 200px;
   text-align: center;
 }
 .skimmer-ok       { color: var(--accent); }
@@ -194,16 +194,16 @@ h1 {
 .check-label {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 7px;
   cursor: pointer;
   color: var(--text);
-  font-size: 11px;
+  font-size: 22px;
   white-space: nowrap;
 }
 .check-label input[type="checkbox"] {
   accent-color: var(--accent);
-  width: 13px;
-  height: 13px;
+  width: 22px;
+  height: 22px;
   cursor: pointer;
 }
 
@@ -362,6 +362,12 @@ h1 {
   justify-content: center;
 }
 
+.vantage-skimmer-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+}
+
 .vantage-display-label {
   font-family: 'Orbitron', monospace;
   font-size: 18px;
@@ -463,6 +469,7 @@ h1 {
   }
   .vantage-display-label { font-size: 13px; }
   .vantage-display-value { font-size: 14px; }
+  .vantage-skimmer-wrap { margin-top: 8px; }
   .vantage-map-canvas { height: 120px; margin-top: 6px; }
   .desktop-main { display: block; padding: 0 10px; }
   #sw-bar {
@@ -833,11 +840,16 @@ canvas.bar-canvas {
   }
 
   /* shrink controls on phone */
-  #region-select { min-width: 100px; font-size: 10px; }
-  #radius-select { min-width: 68px;  font-size: 10px; }
-  .ctrl-label    { font-size: 10px; }
-  .radio-label   { font-size: 10px; }
-  .btn           { font-size: 11px; padding: 5px 10px; }
+  #region-select { min-width: 130px; font-size: 11px; }
+  #radius-select { min-width: 78px;  font-size: 11px; }
+  #grid-input    { width: 84px; font-size: 11px; }
+  .ctrl-label    { font-size: 12px; }
+  .radio-label   { font-size: 12px; gap: 5px; }
+  .radio-label input[type="radio"] { width: 16px; height: 16px; }
+  .check-label   { font-size: 12px; gap: 5px; }
+  .check-label input[type="checkbox"] { width: 14px; height: 14px; }
+  .unit-toggle   { font-size: 12px; padding: 4px 8px; min-width: 30px; }
+  .skimmer-count { font-size: 11px; min-width: 130px; padding: 3px 8px; }
 }
 
 /* ── Status bar ──────────────────────────────────────────────────── */
