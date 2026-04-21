@@ -588,8 +588,14 @@ function ftxSnrToRbnScale(ftxSnr) {
   return 2 + frac * 20;
 }
 
-function regionKeyForIndex(idx) {
-  return SOURCE_REGION_KEYS[idx] || SOURCE_REGION_KEYS[0];
+function sourceRegionKeyForIndex(idx) {
+  if (!Number.isInteger(idx) || idx < 0 || idx >= SOURCE_REGION_KEYS.length) return null;
+  return SOURCE_REGION_KEYS[idx];
+}
+
+function targetRegionKeyForIndex(idx) {
+  if (!Number.isInteger(idx) || idx < 0 || idx >= REGION_KEYS.length) return null;
+  return REGION_KEYS[idx];
 }
 
 function createModeSampleCube() {
@@ -710,11 +716,11 @@ function regionFromLatLon(lat, lon) {
   if (lat >= -35 && lat <= 40 && lon >= -20 && lon <= 55)  return 6;
   if (lat >= -10 && lat <= 75 && lon >= 45)                return 7;
   if (lat <= 0   && lon >= 100)                            return 8;
-  return 0;
+  return -1;
 }
 
 function regionKeyFromLatLon(lat, lon) {
-  return regionKeyForIndex(regionFromLatLon(lat, lon));
+  return sourceRegionKeyForIndex(regionFromLatLon(lat, lon));
 }
 
 // ── Spotter cache ─────────────────────────────────────────────────────────────
@@ -1491,20 +1497,23 @@ async function pollOnce() {
 
   // Overlay FTx quality from PSKReporter by from/to region + band.
   const fromKey = mode === 'region'
-    ? regionKeyForIndex(vantageRegion)
-    : (gridLL ? regionKeyForIndex(regionFromLatLon(gridLL.lat, gridLL.lon)) : null);
+    ? sourceRegionKeyForIndex(vantageRegion)
+    : (gridLL ? sourceRegionKeyForIndex(regionFromLatLon(gridLL.lat, gridLL.lon)) : null);
   let ftxReportsInQuery = 0;
   if (fromKey && pskByRegion[fromKey]) {
     for (let ri = 0; ri < REGIONS.length; ri++) {
-      const toKey = regionKeyForIndex(ri);
+      const toKey = targetRegionKeyForIndex(ri);
       for (let bi = 0; bi < BANDS.length; bi++) {
         const pskEntry = pskByRegion[fromKey]?.[toKey]?.[BANDS[bi].label];
         if (pskEntry && typeof pskEntry.snr === 'number') {
           modeQualityByBand[ri][bi].FTx = pskEntry.snr;
           if (typeof pskEntry.count === 'number' && pskEntry.count > 0)
             ftxReportsInQuery += pskEntry.count;
-          if (Array.isArray(pskEntry.txCalls)) {
-            pskEntry.txCalls.forEach((c) => {
+          // For the Vantage FTx tooltip we want reporting receiver stations
+          // (same conceptual side as "skimmers"), not DX senders.
+          const reporterCalls = Array.isArray(pskEntry.rxCalls) ? pskEntry.rxCalls : pskEntry.txCalls;
+          if (Array.isArray(reporterCalls)) {
+            reporterCalls.forEach((c) => {
               const s = String(c || '').trim().toUpperCase();
               if (s) ftxCallsigns.add(s);
             });

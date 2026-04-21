@@ -226,7 +226,7 @@ function regionFromLatLon(lat, lon) {
   if (lat >= -35 && lat <= 40 && lon >= -20 && lon <= 55)  return 'AF';
   if (lat >= -10 && lat <= 75 && lon >= 45)                return 'AS';
   if (lat <= 0   && lon >= 100)                            return 'OC';
-  return 'ENA';
+  return null;
 }
 
 function bandForFrequencyKhz(freqKhz) {
