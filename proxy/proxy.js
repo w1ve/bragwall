@@ -18,7 +18,9 @@ const PSK_MODES     = (process.env.PSK_MODES || 'FT8')
 const PSK_COOLDOWN_MS = parseInt(process.env.PSK_COOLDOWN_MS || String(30 * 60 * 1000), 10);
 
 const spotMap = new Map();
-const REGION_KEYS = ['ENA', 'CNA', 'WNA', 'SA', 'EU', 'AF', 'AS', 'OC'];
+const REGION_KEYS = ['ENA', 'CNA', 'WNA', 'SA', 'EU', 'AF', 'AS', 'OC', 'CAR'];
+const CARIBBEAN_CENTER = { lat: 17.0, lon: -72.0, radiusMiles: 950 };
+const MAX_PSK_CALLS_PER_CELL = parseInt(process.env.PSK_MAX_CALLS_PER_CELL || '120', 10);
 const BANDS = [
   { label: '160m', min: 1800,  max: 2000  },
   { label: '80m',  min: 3500,  max: 4000  },
@@ -202,7 +204,18 @@ function gridToLatLon(grid) {
   return { lat, lon };
 }
 
+function distanceMiles(lat1, lon1, lat2, lon2) {
+  const R = 3958.8;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function regionFromLatLon(lat, lon) {
+  const dCar = distanceMiles(lat, lon, CARIBBEAN_CENTER.lat, CARIBBEAN_CENTER.lon);
+  if (dCar <= CARIBBEAN_CENTER.radiusMiles && lat >= 8 && lat <= 30 && lon >= -92 && lon <= -56) return 'CAR';
   if (lat > 15 && lon >= -170 && lon <= -50) {
     if (lon >= -85)  return 'ENA';
     if (lon >= -105) return 'CNA';
@@ -240,12 +253,14 @@ function parsePskReports(xmlText) {
     const attrs = parseAttributes(m[1]);
     const rxGrid = attrs.receiverLocator || attrs.receiverlocator || attrs.rxLocator || '';
     const txGrid = attrs.senderLocator   || attrs.senderlocator   || attrs.txLocator || '';
+    const rxCall = String(attrs.receiverCallsign || attrs.receiverCall || attrs.receiver || '').trim().toUpperCase();
+    const txCall = String(attrs.senderCallsign || attrs.senderCall || attrs.sender || '').trim().toUpperCase();
     const snrRaw = attrs.sNR || attrs.SNR || attrs.snr;
     const freqRaw = attrs.frequency || attrs.freq;
     const snr = parseFloat(snrRaw);
     const freq = parseFloat(freqRaw);
     if (!rxGrid || !txGrid || Number.isNaN(snr) || Number.isNaN(freq)) continue;
-    reports.push({ rxGrid, txGrid, snr, freq });
+    reports.push({ rxGrid, txGrid, rxCall, txCall, snr, freq });
   }
   return reports;
 }
@@ -267,8 +282,11 @@ function foldPskReports(reports) {
     const correctedSnr = r.snr + 7.0; // 2500Hz -> ~500Hz bandwidth normalization
     bySample[fromRegion] ??= {};
     bySample[fromRegion][toRegion] ??= {};
-    bySample[fromRegion][toRegion][band] ??= [];
-    bySample[fromRegion][toRegion][band].push(correctedSnr);
+    bySample[fromRegion][toRegion][band] ??= { snrValues: [], txCalls: new Set(), rxCalls: new Set() };
+    const bucket = bySample[fromRegion][toRegion][band];
+    bucket.snrValues.push(correctedSnr);
+    if (r.txCall) bucket.txCalls.add(r.txCall);
+    if (r.rxCall) bucket.rxCalls.add(r.rxCall);
   }
 
   const out = {};
@@ -276,10 +294,15 @@ function foldPskReports(reports) {
     out[fromRegion] = {};
     for (const [toRegion, bandMap] of Object.entries(toMap)) {
       out[fromRegion][toRegion] = {};
-      for (const [band, snrValues] of Object.entries(bandMap)) {
-        const snr = median(snrValues);
+      for (const [band, bucket] of Object.entries(bandMap)) {
+        const snr = median(bucket.snrValues);
         if (snr == null) continue;
-        out[fromRegion][toRegion][band] = { snr: Math.round(snr * 10) / 10, count: snrValues.length };
+        out[fromRegion][toRegion][band] = {
+          snr: Math.round(snr * 10) / 10,
+          count: bucket.snrValues.length,
+          txCalls: Array.from(bucket.txCalls).sort().slice(0, MAX_PSK_CALLS_PER_CELL),
+          rxCalls: Array.from(bucket.rxCalls).sort().slice(0, MAX_PSK_CALLS_PER_CELL),
+        };
       }
     }
   }

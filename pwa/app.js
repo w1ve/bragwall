@@ -33,6 +33,7 @@ const SEG_COUNT  = 15;
 
 const SSB_SNR_THRESHOLD = 20.0;  // min median SNR (dB) for SSB to be considered workable
 const KNOWN_MODES = ['CW', 'RTTY', 'FT8', 'FT4'];
+const TOOLTIP_CALLSIGN_LIMIT = 120;
 
 const PROXY_BASE = '';   // empty = same origin as the PWA
 const REGION_INDEX_BY_KEY = REGION_KEYS.reduce((acc, key, idx) => {
@@ -1409,6 +1410,8 @@ async function pollOnce() {
   const sampled = Array.from({length: REGIONS.length}, () => new Uint8Array(BANDS.length));
   const regionSkimmers = new Set();
   const modeSamples = createModeSampleCube();
+  const ftxCallsigns = new Set();
+  let skimmerCallsigns = [];
 
   for (const [spotCall, spot] of Object.entries(data)) {
     if (!spot.lsn || typeof spot.lsn !== 'object') continue;
@@ -1461,6 +1464,7 @@ async function pollOnce() {
       spotsProcessed++;
     }
     skimmerCount = skimmersInRadius.size;
+    skimmerCallsigns = Array.from(skimmersInRadius).sort();
 
     // If no skimmers heard within radius, clear all meters immediately
     // (don't rely on slow EMA decay — give instant feedback)
@@ -1472,6 +1476,7 @@ async function pollOnce() {
   // Region mode skimmer count
   if (mode === 'region') {
     skimmerCount = regionSkimmers.size;
+    skimmerCallsigns = Array.from(regionSkimmers).sort();
   }
 
   // Fetch PSKReporter aggregate in parallel with final UI composition.
@@ -1498,6 +1503,12 @@ async function pollOnce() {
           modeQualityByBand[ri][bi].FTx = pskEntry.snr;
           if (typeof pskEntry.count === 'number' && pskEntry.count > 0)
             ftxReportsInQuery += pskEntry.count;
+          if (Array.isArray(pskEntry.txCalls)) {
+            pskEntry.txCalls.forEach((c) => {
+              const s = String(c || '').trim().toUpperCase();
+              if (s) ftxCallsigns.add(s);
+            });
+          }
 
           // Feed PSK FTx into the main S-meter: full fallback when RBN is absent,
           // and a light blend when RBN data exists for the same cell.
@@ -1519,7 +1530,13 @@ async function pollOnce() {
     }
   }
 
-  updateSkimmerCount(skimmerCount, mode === 'grid', ftxReportsInQuery);
+  updateSkimmerCount(
+    skimmerCount,
+    mode === 'grid',
+    ftxReportsInQuery,
+    skimmerCallsigns,
+    Array.from(ftxCallsigns).sort(),
+  );
   refreshUI(modeQualityByBand);
 
   const ts = new Date().toLocaleTimeString();
@@ -1564,16 +1581,48 @@ function setStatus(msg, cls = '') {
 }
 
 // ── Skimmer count display ─────────────────────────────────────────────────────
-function updateSkimmerCount(n, isGrid, ftxReports = 0) {
-  const el = document.getElementById('skimmer-count');
-  if (!el) return;
-  const skimmerTxt = `${n} skimmer${n === 1 ? '' : 's'} / ${ftxReports} FTx report${ftxReports === 1 ? '' : 's'}`;
-  el.textContent = skimmerTxt;
-  if (n === 0) {
-    // Keep region-mode counters visually active even when currently zero.
-    el.className = isGrid ? 'skimmer-count skimmer-none' : 'skimmer-count skimmer-few';
-  } else {
-    el.className   = n < 3 ? 'skimmer-count skimmer-few' : 'skimmer-count skimmer-ok';
+function formatTooltipList(title, calls) {
+  const fullList = Array.isArray(calls) ? calls : [];
+  if (fullList.length === 0) return `${title} (0)\nnone`;
+  const shown = fullList.slice(0, TOOLTIP_CALLSIGN_LIMIT);
+  const remaining = fullList.length - shown.length;
+  let out = `${title} (${fullList.length})\n${shown.join(', ')}`;
+  if (remaining > 0) out += `\n...and ${remaining} more`;
+  return out;
+}
+
+function updateSkimmerCount(n, isGrid, ftxReports = 0, skimmerCalls = [], ftxCalls = []) {
+  const skimmerLabel = document.getElementById('vantage-skimmer-label');
+  const ftxLabel = document.getElementById('vantage-ftx-label');
+  const combinedLabel = document.getElementById('skimmer-count');
+  if (!skimmerLabel && !combinedLabel) return;
+  const skimmerClass = n === 0
+    ? (isGrid ? 'skimmer-none' : 'skimmer-few')
+    : (n < 3 ? 'skimmer-few' : 'skimmer-ok');
+  const ftxClass = ftxReports === 0 ? 'skimmer-few' : 'skimmer-ok';
+
+  if (skimmerLabel) {
+    skimmerLabel.textContent = `${n} skimmer${n === 1 ? '' : 's'}`;
+    skimmerLabel.setAttribute('title', formatTooltipList('Skimmers', skimmerCalls));
+    skimmerLabel.className = `skimmer-count vantage-count-label ${skimmerClass}`;
+  }
+
+  if (ftxLabel) {
+    ftxLabel.textContent = `${ftxReports} FTx report${ftxReports === 1 ? '' : 's'}`;
+    ftxLabel.setAttribute('title', formatTooltipList('FTx calls', ftxCalls));
+    ftxLabel.className = `skimmer-count vantage-count-label ${ftxClass}`;
+  }
+
+  // Backward compatibility / accessibility mirror text.
+  if (combinedLabel) {
+    combinedLabel.textContent = `${n} skimmer${n === 1 ? '' : 's'} / ${ftxReports} FTx report${ftxReports === 1 ? '' : 's'}`;
+    if (!skimmerLabel) {
+      combinedLabel.className = `skimmer-count vantage-count-label ${skimmerClass}`;
+    }
+    combinedLabel.setAttribute(
+      'title',
+      `${formatTooltipList('Skimmers', skimmerCalls)}\n\n${formatTooltipList('FTx calls', ftxCalls)}`,
+    );
   }
 }
 
