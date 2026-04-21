@@ -497,7 +497,7 @@ const MODE_QUALITY_COLORS = ['#00d250', '#e6c800', '#ff8c00', '#dc1e1e'];
 
 function buildQualityTrack(frac, enabled) {
   const track = document.createElement('span');
-  track.className = 'mode-quality-bar';
+  track.className = 'mode-quality-track';
   for (let i = 0; i < 4; i++) {
     const seg = document.createElement('span');
     seg.className = 'mode-quality-seg';
