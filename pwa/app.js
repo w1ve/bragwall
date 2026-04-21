@@ -497,11 +497,10 @@ const MODE_QUALITY_COLORS = ['#00d250', '#e6c800', '#ff8c00', '#dc1e1e'];
 
 function buildQualityTrack(frac, enabled) {
   const track = document.createElement('span');
-  track.className = 'mode-quality-track';
+  track.className = 'mode-quality-bar';
   for (let i = 0; i < 4; i++) {
     const seg = document.createElement('span');
     seg.className = 'mode-quality-seg';
-    seg.style.setProperty('--seg-color', MODE_QUALITY_COLORS[i]);
     let fill = 0;
     if (enabled && frac > 0) {
       const start = i * 0.25;
@@ -509,7 +508,9 @@ function buildQualityTrack(frac, enabled) {
       if (frac >= end) fill = 1;
       else if (frac > start) fill = (frac - start) / 0.25;
     }
-    seg.style.setProperty('--seg-fill', `${Math.round(fill * 100)}%`);
+    const fillPct = Math.round(fill * 100);
+    const c = MODE_QUALITY_COLORS[i];
+    seg.style.background = `linear-gradient(to right, ${c} 0 ${fillPct}%, #1c1c32 ${fillPct}% 100%)`;
     track.appendChild(seg);
   }
   return track;

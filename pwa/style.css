@@ -244,7 +244,7 @@ h1 {
   line-height: 9px;
 }
 
-.mode-quality-bar {
+.mode-quality-track {
   display: flex;
   width: calc(100% - 2px);
   max-width: calc(100% - 2px);
