@@ -51,14 +51,61 @@ let pskByRegion = {};
 let pskMeta = { age: null, cached: false, stale: false };
 
 const VANTAGE_GRID_COLOR = '#ffffff';
-const REGION_LAND_KEY = ['NA', 'NA', 'NA', 'SA', 'EU', 'AF', 'AS', 'OC'];
+const SOURCE_REGION_NAMES = [...REGIONS, 'Caribbean'];
+const SOURCE_REGION_KEYS = [...REGION_KEYS, 'CAR'];
+const CARIBBEAN_REGION_INDEX = 8;
+const CARIBBEAN_CENTER = { lat: 17.0, lon: -72.0, radiusMiles: 950 };
+const REGION_LAND_KEY = ['NA', 'NA', 'NA', 'SA', 'EU', 'AF', 'AS', 'OC', 'CAR'];
 const WORLD_GEOJSON_SOURCES = [
   'https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson',
   'https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json',
 ];
 let detailedWorldPolygons = null;
+let detailedWorldRegionPolygons = null;
 let detailedWorldLoadPromise = null;
 let detailedWorldLoadFailed = false;
+const CARIBBEAN_COUNTRIES = new Set([
+  'The Bahamas', 'Cuba', 'Jamaica', 'Haiti', 'Dominican Republic', 'Puerto Rico',
+  'Trinidad and Tobago', 'Barbados', 'Antigua and Barbuda', 'Dominica',
+  'Saint Lucia', 'Saint Vincent and the Grenadines', 'Grenada',
+  'Saint Kitts and Nevis', 'Aruba', 'Curacao', 'Curaçao', 'Guadeloupe', 'Martinique',
+]);
+const SOUTH_AMERICA_COUNTRIES = new Set([
+  'Argentina', 'Bolivia', 'Brazil', 'Chile', 'Colombia', 'Ecuador', 'Guyana',
+  'Paraguay', 'Peru', 'Suriname', 'Uruguay', 'Venezuela', 'French Guiana',
+]);
+const NORTH_AMERICA_COUNTRIES = new Set([
+  'USA', 'Canada', 'Mexico', 'Greenland', 'Belize', 'Guatemala', 'Honduras',
+  'El Salvador', 'Nicaragua', 'Costa Rica', 'Panama',
+]);
+const EUROPE_COUNTRIES = new Set([
+  'Albania', 'Andorra', 'Austria', 'Belarus', 'Belgium', 'Bosnia and Herzegovina',
+  'Bulgaria', 'Croatia', 'Czech Republic', 'Denmark', 'Estonia', 'Finland',
+  'France', 'Germany', 'Greece', 'Hungary', 'Iceland', 'Ireland', 'Italy',
+  'Kosovo', 'Latvia', 'Lithuania', 'Luxembourg', 'Macedonia', 'Moldova',
+  'Montenegro', 'Netherlands', 'Norway', 'Poland', 'Portugal', 'Romania',
+  'Russia', 'Serbia', 'Slovakia', 'Slovenia', 'Spain', 'Sweden', 'Switzerland',
+  'Ukraine', 'United Kingdom', 'Northern Cyprus', 'Cyprus',
+]);
+const AFRICA_COUNTRIES = new Set([
+  'Algeria', 'Angola', 'Benin', 'Botswana', 'Burkina Faso', 'Burundi', 'Cameroon',
+  'Central African Republic', 'Chad', 'Democratic Republic of the Congo',
+  'Republic of the Congo', 'Djibouti', 'Egypt', 'Equatorial Guinea', 'Eritrea',
+  'Ethiopia', 'Gabon', 'Gambia', 'Ghana', 'Guinea', 'Guinea Bissau', 'Ivory Coast',
+  'Kenya', 'Lesotho', 'Liberia', 'Libya', 'Madagascar', 'Malawi', 'Mali',
+  'Mauritania', 'Morocco', 'Mozambique', 'Namibia', 'Niger', 'Nigeria', 'Rwanda',
+  'Senegal', 'Sierra Leone', 'Somalia', 'Somaliland', 'South Africa',
+  'South Sudan', 'Sudan', 'Swaziland', 'eSwatini', 'Tanzania', 'Togo', 'Tunisia',
+  'Uganda', 'Western Sahara', 'Zambia', 'Zimbabwe',
+]);
+const OCEANIA_COUNTRIES = new Set([
+  'Australia', 'New Zealand', 'Papua New Guinea', 'Fiji',
+  'Solomon Islands', 'Vanuatu', 'New Caledonia',
+]);
+const CARIBBEAN_SOURCE_PREFIXES = [
+  'KP1', 'KP2', 'KP4', 'WP4', 'NP4', 'VP9', 'CO', 'CM', 'HH', 'HI',
+  '6Y', '8P', '9Y', 'J3', 'J6', 'V2', 'V4', 'FG', 'FM', 'FS', 'PJ2', 'PJ4',
+].sort((a, b) => b.length - a.length);
 const WORLD_LANDMASSES = {
   NA: [
     [-168, 72], [-152, 62], [-135, 56], [-122, 50], [-108, 50], [-96, 46],
@@ -85,6 +132,10 @@ const WORLD_LANDMASSES = {
   OC: [
     [110, -11], [124, -16], [138, -24], [153, -31], [150, -42], [134, -45],
     [120, -40], [112, -29],
+  ],
+  CAR: [
+    [-88, 24], [-82, 28], [-70, 27], [-61, 22], [-60, 14], [-66, 10],
+    [-76, 10], [-84, 15], [-88, 20],
   ],
 };
 
@@ -261,6 +312,48 @@ function extractDetailedPolygons(geojson) {
   return polygons.length > 0 ? polygons : null;
 }
 
+function countryNameForFeature(feature) {
+  return String(
+    feature?.properties?.name ||
+    feature?.properties?.NAME ||
+    feature?.properties?.admin ||
+    feature?.properties?.ADMIN ||
+    ''
+  ).trim();
+}
+
+function pushRegionPolygons(regionMap, regionKey, rings) {
+  if (!regionMap[regionKey]) regionMap[regionKey] = [];
+  rings.forEach((ring) => regionMap[regionKey].push(ring));
+}
+
+function assignRegionKeyForCountry(name) {
+  if (!name) return null;
+  if (CARIBBEAN_COUNTRIES.has(name)) return 'CAR';
+  if (SOUTH_AMERICA_COUNTRIES.has(name)) return 'SA';
+  if (NORTH_AMERICA_COUNTRIES.has(name)) return 'NA';
+  if (EUROPE_COUNTRIES.has(name)) return 'EU';
+  if (AFRICA_COUNTRIES.has(name)) return 'AF';
+  if (OCEANIA_COUNTRIES.has(name)) return 'OC';
+  return 'AS';
+}
+
+function extractRegionPolygons(geojson) {
+  const features = Array.isArray(geojson?.features) ? geojson.features : [];
+  const regionMap = { NA: [], SA: [], EU: [], AF: [], AS: [], OC: [], CAR: [] };
+  features.forEach((feature) => {
+    const coords = feature?.geometry?.coordinates;
+    if (!coords) return;
+    const rings = flattenGeoCoordinates(coords, []);
+    if (!rings.length) return;
+    const country = countryNameForFeature(feature);
+    const regionKey = assignRegionKeyForCountry(country);
+    if (!regionKey) return;
+    pushRegionPolygons(regionMap, regionKey, rings);
+  });
+  return regionMap;
+}
+
 async function loadDetailedWorldPolygons() {
   if (detailedWorldPolygons) return detailedWorldPolygons;
   if (detailedWorldLoadPromise) return detailedWorldLoadPromise;
@@ -275,6 +368,7 @@ async function loadDetailedWorldPolygons() {
         const polygons = extractDetailedPolygons(data);
         if (polygons && polygons.length > 0) {
           detailedWorldPolygons = polygons;
+          detailedWorldRegionPolygons = extractRegionPolygons(data);
           detailedWorldLoadFailed = false;
           return detailedWorldPolygons;
         }
@@ -303,6 +397,58 @@ function drawWorldLandmasses(ctx, project, fillAlpha = 0.24, strokeAlpha = 0.46)
   });
 }
 
+function drawHighlightedRegion(ctx, project, regionKey, regionIdx, w, h) {
+  const regionPolys = detailedWorldRegionPolygons?.[regionKey] || null;
+  const highlightFill = 'rgba(0, 210, 80, 0.78)';
+  const highlightStroke = 'rgba(0, 169, 107, 0.95)';
+  const naLonSplitByRegion = {
+    2: [-130, -108], // W. North America
+    1: [-108, -92],  // C. North America
+    0: [-92, -66],   // E. North America
+  };
+
+  if (regionPolys && regionPolys.length > 0) {
+    if (regionKey === 'NA' && regionIdx >= 0 && regionIdx <= 2) {
+      const split = naLonSplitByRegion[regionIdx];
+      if (split) {
+        const [lo, hi] = split;
+        const xLo = project(lo, 0).x;
+        const xHi = project(hi, 0).x;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(Math.min(xLo, xHi), 0, Math.abs(xHi - xLo), h);
+        ctx.clip();
+        regionPolys.forEach((ring) => drawPolygon(ctx, ring, project, highlightFill, highlightStroke, 1.6));
+        ctx.restore();
+      } else {
+        regionPolys.forEach((ring) => drawPolygon(ctx, ring, project, highlightFill, highlightStroke, 1.6));
+      }
+    } else {
+      regionPolys.forEach((ring) => drawPolygon(ctx, ring, project, highlightFill, highlightStroke, 1.6));
+    }
+    return;
+  }
+
+  const points = WORLD_LANDMASSES[regionKey];
+  if (!points) return;
+  if (regionKey === 'NA' && regionIdx >= 0 && regionIdx <= 2) {
+    const split = naLonSplitByRegion[regionIdx];
+    if (split) {
+      const [lo, hi] = split;
+      const xLo = project(lo, 0).x;
+      const xHi = project(hi, 0).x;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(Math.min(xLo, xHi), 0, Math.abs(xHi - xLo), h);
+      ctx.clip();
+      drawPolygon(ctx, points, project, highlightFill, highlightStroke, 1.6);
+      ctx.restore();
+      return;
+    }
+  }
+  drawPolygon(ctx, points, project, highlightFill, highlightStroke, 1.6);
+}
+
 function drawRegionVantageMap(canvas, regionIdx) {
   const setup = prepareHiDPICanvas(canvas);
   if (!setup) return;
@@ -314,39 +460,8 @@ function drawRegionVantageMap(canvas, regionIdx) {
   drawMapBackground(ctx, w, h);
   drawGeoGrid(ctx, w, h, project, 30, 20);
   drawWorldLandmasses(ctx, project, 0.15, 0.25);
-
-  const landKey = REGION_LAND_KEY[regionIdx];
-  const points = WORLD_LANDMASSES[landKey];
-  if (!points) return;
-
-  if (landKey === 'NA' && regionIdx >= 0 && regionIdx <= 2) {
-    const px = points.map(([lon, lat]) => project(lon, lat));
-    const xs = px.map(p => p.x);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const segW = (maxX - minX) / 3;
-    const segment = regionIdx === 2 ? 0 : (regionIdx === 1 ? 1 : 2); // W, C, E
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(minX + segW * segment, 0, segW, h);
-    ctx.clip();
-    drawPolygon(ctx, points, project, 'rgba(0, 210, 80, 0.76)', 'rgba(0, 169, 107, 0.94)', 1.6);
-    ctx.restore();
-
-    // Subtle NA thirds guides.
-    ctx.strokeStyle = 'rgba(255,255,255,0.24)';
-    ctx.lineWidth = 1;
-    for (let i = 1; i <= 2; i++) {
-      const x = minX + segW * i;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, h);
-      ctx.stroke();
-    }
-  } else {
-    drawPolygon(ctx, points, project, 'rgba(0, 210, 80, 0.76)', 'rgba(0, 169, 107, 0.94)', 1.6);
-  }
+  const landKey = REGION_LAND_KEY[regionIdx] || 'NA';
+  drawHighlightedRegion(ctx, project, landKey, regionIdx, w, h);
 }
 
 function drawGridVantageMap(canvas, grid, radiusMiles, radiusLabel) {
@@ -463,7 +578,7 @@ function ftxSnrToRbnScale(ftxSnr) {
 }
 
 function regionKeyForIndex(idx) {
-  return REGION_KEYS[idx] || REGION_KEYS[0];
+  return SOURCE_REGION_KEYS[idx] || SOURCE_REGION_KEYS[0];
 }
 
 function createModeSampleCube() {
@@ -565,16 +680,18 @@ function classifyCallsign(call) {
 }
 
 function regionFromLatLon(lat, lon) {
+  const dCar = distanceMiles(lat, lon, CARIBBEAN_CENTER.lat, CARIBBEAN_CENTER.lon);
+  if (dCar <= CARIBBEAN_CENTER.radiusMiles && lat >= 8 && lat <= 30 && lon >= -92 && lon <= -56) return CARIBBEAN_REGION_INDEX;
   if (lat > 15 && lon >= -170 && lon <= -50) {
     if (lon >= -85)  return 0;
     if (lon >= -105) return 1;
     return 2;
   }
-  if (lat >= -60 && lat <= 15 && lon >= -82 && lon <= -34) return 3;
-  if (lat >= 35  && lat <= 72 && lon >= -12 && lon <= 45)  return 4;
-  if (lat >= -35 && lat <= 40 && lon >= -20 && lon <= 55)  return 5;
-  if (lat >= -10 && lat <= 75 && lon >= 45)                return 6;
-  if (lat <= 0   && lon >= 100)                            return 7;
+  if (lat >= -60 && lat <= 15 && lon >= -82 && lon <= -34) return 4;
+  if (lat >= 35  && lat <= 72 && lon >= -12 && lon <= 45)  return 5;
+  if (lat >= -35 && lat <= 40 && lon >= -20 && lon <= 55)  return 6;
+  if (lat >= -10 && lat <= 75 && lon >= 45)                return 7;
+  if (lat <= 0   && lon >= 100)                            return 8;
   return 0;
 }
 

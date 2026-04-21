@@ -145,7 +145,7 @@ h1 {
 .ctrl-select:focus, .ctrl-input:focus { border-color: var(--accent); }
 .ctrl-select:disabled, .ctrl-input:disabled { opacity: 0.4; cursor: not-allowed; }
 
-#region-select { min-width: 260px; }
+#region-select { min-width: 280px; }
 #radius-select { min-width: 165px; }
 #grid-input    { width: 132px; text-transform: uppercase; }
 
