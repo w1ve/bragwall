@@ -500,23 +500,23 @@ function buildModeRow(el, hasData, activeModes, modeSnr = {}) {
     } else if (active && isSSB) {
       span.className   = 'mode-label mode-ssb';
       txt.textContent = '\u2713' + abbr;
-      qBar.style.background = qColor || 'transparent';
-      qBar.style.opacity = qColor ? '1' : '0';
+      qBar.style.background = qColor || '#1c1c32';
+      qBar.style.display = 'block';
     } else if (active) {
       span.className   = 'mode-label mode-active';
       txt.textContent = '\u2713' + abbr;
-      qBar.style.background = qColor || 'transparent';
-      qBar.style.opacity = qColor ? '1' : '0';
+      qBar.style.background = qColor || '#1c1c32';
+      qBar.style.display = 'block';
     } else if (isSSB) {
       span.className   = 'mode-label mode-dim';
       txt.textContent = abbr;
-      qBar.style.background = 'transparent';
-      qBar.style.opacity = '0';
+      qBar.style.background = '#1c1c32';
+      qBar.style.display = 'block';
     } else {
       span.className   = 'mode-label mode-absent';
       txt.textContent = '\u2717' + abbr;
-      qBar.style.background = 'transparent';
-      qBar.style.opacity = '0';
+      qBar.style.background = '#1c1c32';
+      qBar.style.display = 'block';
     }
     span.appendChild(qBar);
     span.appendChild(txt);

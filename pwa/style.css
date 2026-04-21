@@ -226,34 +226,34 @@ h1 {
   flex: 1;
   text-align: center;
   min-width: 0;
-  line-height: 11px;
-  height: 11px;
+  line-height: 1;
+  height: 13px;
   border-radius: 2px;
-  padding: 0 1px 0;
-  display: block;
+  padding: 2px 1px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   position: relative;
   overflow: hidden;
 }
 
 .mode-label-text {
-  display: inline-block;
+  display: block;
   width: 100%;
   text-align: center;
   line-height: 9px;
-  position: relative;
-  top: 2px; /* leave room for the 2px quality strip at top */
 }
 
 .mode-quality-bar {
-  display: none;
-  width: 100%;
+  display: block;
+  width: calc(100% - 2px);
   height: 2px;
-  border-radius: 0;
+  border-radius: 1px;
   background: transparent;
   opacity: 1;
   position: absolute;
-  left: 0;
-  top: 0;
+  left: 1px;
+  top: 1px;
 }
 
 /* Active — white text on bright green badge */
@@ -286,7 +286,8 @@ h1 {
   border: 1px solid #222233;
 }
 
-.band-mode-row-phone .mode-label { font-size: 11px; line-height: 14px; height: 14px; }
+.band-mode-row-phone .mode-label { font-size: 10px; height: 16px; padding-top: 2px; }
+.band-mode-row-phone .mode-label-text { line-height: 11px; }
 .band-mode-row-phone { height: 22px; padding: 3px 6px; gap: 3px; }
 
 
