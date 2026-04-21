@@ -771,9 +771,11 @@ function refreshUI(modeQualityByBand = null) {
       }
 
       // Per-band mode rows
-      const bModes   = m.activeModes(bi);
-      const bHasData = m.hasValue[bi];
+      const bModes = m.activeModes(bi);
       const q = modeQualityByBand?.[ri]?.[bi] || {};
+      // Let PSKReporter drive FTx activity even when RBN has no digital spots.
+      if (q.FTx != null) bModes.add('FT8');
+      const bHasData = m.hasValue[bi] || q.FTx != null;
       if (deskModeRows[ri]?.[bi]) buildModeRow(deskModeRows[ri][bi], bHasData, bModes, q);
       if (accModeRows[ri]?.[bi])  buildModeRow(accModeRows[ri][bi],  bHasData, bModes, q);
     });
