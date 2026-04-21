@@ -736,6 +736,15 @@ function sourceRegionKeyForCallsign(call) {
   return REGION_KEYS[regionIdx] || null;
 }
 
+function gridCellKeyFromLatLon(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  // Same granularity as Maidenhead 4-char cells used in PSK reports.
+  const lonCell = Math.floor((lon + 180) / 2);
+  const latCell = Math.floor((lat + 90) / 1);
+  if (!Number.isFinite(lonCell) || !Number.isFinite(latCell)) return null;
+  return `${lonCell},${latCell}`;
+}
+
 function createModeSampleCube() {
   return Array.from({ length: REGIONS.length }, () =>
     Array.from({ length: BANDS.length }, () => ({ CW: [], RTTY: [], FT8: [], FT4: [] }))
@@ -1638,6 +1647,8 @@ async function pollOnce() {
     ? sourceRegionKeyForIndex(vantageRegion)
     : (gridLL ? sourceRegionKeyForIndex(regionFromLatLon(gridLL.lat, gridLL.lon)) : null);
   let ftxReportsInQuery = 0;
+  const gridPskCallIncluded = new Set();
+  const pskGridCallCounts = {};
   if (fromKey && pskByRegion[fromKey]) {
     for (let ri = 0; ri < REGIONS.length; ri++) {
       const toKey = targetRegionKeyForIndex(ri);
@@ -1645,8 +1656,21 @@ async function pollOnce() {
         const pskEntry = pskByRegion[fromKey]?.[toKey]?.[BANDS[bi].label];
         if (pskEntry && typeof pskEntry.snr === 'number') {
           modeQualityByBand[ri][bi].FTx = pskEntry.snr;
-          if (typeof pskEntry.count === 'number' && pskEntry.count > 0)
+          if (typeof pskEntry.count === 'number' && pskEntry.count > 0 && mode !== 'grid')
             ftxReportsInQuery += pskEntry.count;
+          if (mode === 'grid' && gridLL && Array.isArray(pskEntry.rxGridCounts)) {
+            pskEntry.rxGridCounts.forEach((entry) => {
+              if (!Array.isArray(entry) || entry.length < 2) return;
+              const cell = String(entry[0] || '').toUpperCase();
+              const count = Number(entry[1] || 0);
+              if (cell.length < 4 || !Number.isFinite(count) || count <= 0) return;
+              const ll = gridToLatLon(cell);
+              if (!ll) return;
+              const dist = distanceMiles(gridLL.lat, gridLL.lon, ll.lat, ll.lon);
+              if (dist > radiusMiles) return;
+              pskGridCallCounts[cell] = (pskGridCallCounts[cell] || 0) + count;
+            });
+          }
           // For the Vantage FTx tooltip we want reporting receiver stations
           // (same conceptual side as "skimmers"), never DX sender fallbacks.
           const reporterCalls = Array.isArray(pskEntry.rxCalls) ? pskEntry.rxCalls : [];
@@ -1675,6 +1699,14 @@ async function pollOnce() {
         }
       }
     }
+  }
+  if (mode === 'grid') {
+    ftxReportsInQuery = 0;
+    Object.entries(pskGridCallCounts).forEach(([cell, count]) => {
+      if (gridPskCallIncluded.has(cell)) return;
+      gridPskCallIncluded.add(cell);
+      ftxReportsInQuery += count;
+    });
   }
 
   updateSkimmerCount(

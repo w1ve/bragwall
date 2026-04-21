@@ -135,6 +135,8 @@ let pskCacheFetched  = 0;
 let pskFetchPromise  = null;
 let pskBlockedUntil  = 0;
 let pskLastError     = null;
+let pskCacheReports  = null;
+const MAX_PSK_REPORTS_RESPONSE = parseInt(process.env.PSK_MAX_REPORTS_RESPONSE || '8000', 10);
 
 function pruneSpots() {
   const cutoff = Date.now() - SPOT_KEEP_MS;
@@ -427,11 +429,20 @@ function foldPskReports(reports) {
     const correctedSnr = r.snr + 7.0; // 2500Hz -> ~500Hz bandwidth normalization
     bySample[fromRegion] ??= {};
     bySample[fromRegion][toRegion] ??= {};
-    bySample[fromRegion][toRegion][band] ??= { snrValues: [], txCalls: new Set(), rxCalls: new Set() };
+    bySample[fromRegion][toRegion][band] ??= {
+      snrValues: [],
+      txCalls: new Set(),
+      rxCalls: new Set(),
+      rxGridCounts: new Map(),
+    };
     const bucket = bySample[fromRegion][toRegion][band];
     bucket.snrValues.push(correctedSnr);
     if (r.txCall) bucket.txCalls.add(r.txCall);
     if (r.rxCall) bucket.rxCalls.add(r.rxCall);
+    const rxGridCell = String(r.rxGrid || '').toUpperCase().slice(0, 4);
+    if (rxGridCell.length === 4) {
+      bucket.rxGridCounts.set(rxGridCell, (bucket.rxGridCounts.get(rxGridCell) || 0) + 1);
+    }
   }
 
   const out = {};
@@ -447,6 +458,7 @@ function foldPskReports(reports) {
           count: bucket.snrValues.length,
           txCalls: Array.from(bucket.txCalls).sort().slice(0, MAX_PSK_CALLS_PER_CELL),
           rxCalls: Array.from(bucket.rxCalls).sort().slice(0, MAX_PSK_CALLS_PER_CELL),
+          rxGridCounts: Array.from(bucket.rxGridCounts.entries()).sort((a, b) => b[1] - a[1]),
         };
       }
     }
@@ -478,21 +490,40 @@ async function fetchPskMode(mode) {
   return reports;
 }
 
-async function servePsk(res) {
+function compactPskReports(reports) {
+  if (!Array.isArray(reports)) return [];
+  return reports
+    .slice(0, MAX_PSK_REPORTS_RESPONSE)
+    .map((r) => ({
+      rxGrid: r.rxGrid || '',
+      txGrid: r.txGrid || '',
+      rxCall: r.rxCall || '',
+      txCall: r.txCall || '',
+      snr: Number.isFinite(r.snr) ? r.snr : null,
+      freq: Number.isFinite(r.freq) ? r.freq : null,
+    }));
+}
+
+async function servePsk(res, query = {}) {
+  const includeReports = query?.includeReports === '1' || query?.includeReports === 'true';
   const now = Date.now();
   if (pskCacheData && (now - pskCacheFetched) < PSK_CACHE_MS) {
-    send(res, 200, 'application/json', JSON.stringify({
+    const payload = {
       age: Math.round((now - pskCacheFetched) / 1000),
       fetchedAt: new Date(pskCacheFetched).toISOString(),
       byRegion: pskCacheData,
       cached: true,
+    };
+    if (includeReports && pskCacheReports) payload.reports = pskCacheReports;
+    send(res, 200, 'application/json', JSON.stringify({
+      ...payload,
     }));
     return;
   }
   if (now < pskBlockedUntil) {
     const retryIn = Math.max(0, Math.round((pskBlockedUntil - now) / 1000));
     if (pskCacheData) {
-      send(res, 200, 'application/json', JSON.stringify({
+      const payload = {
         age: Math.round((now - pskCacheFetched) / 1000),
         fetchedAt: new Date(pskCacheFetched).toISOString(),
         byRegion: pskCacheData,
@@ -500,6 +531,10 @@ async function servePsk(res) {
         stale: true,
         retryIn,
         error: pskLastError || 'psk_throttled',
+      };
+      if (includeReports && pskCacheReports) payload.reports = pskCacheReports;
+      send(res, 200, 'application/json', JSON.stringify({
+        ...payload,
       }));
       return;
     }
@@ -522,6 +557,7 @@ async function servePsk(res) {
         .map(mr => mr.reason?.code || mr.reason?.message || 'psk_mode_error');
       if (reports.length === 0) throw new Error('no_psk_reports');
       pskCacheData = foldPskReports(reports);
+      pskCacheReports = compactPskReports(reports);
       pskCacheFetched = Date.now();
       pskLastError = null;
       pskBlockedUntil = 0;
@@ -534,20 +570,28 @@ async function servePsk(res) {
 
   try {
     const byRegion = await pskFetchPromise;
-    send(res, 200, 'application/json', JSON.stringify({
+    const payload = {
       age: Math.round((Date.now() - pskCacheFetched) / 1000),
       fetchedAt: new Date(pskCacheFetched).toISOString(),
       byRegion,
       cached: false,
+    };
+    if (includeReports && pskCacheReports) payload.reports = pskCacheReports;
+    send(res, 200, 'application/json', JSON.stringify({
+      ...payload,
     }));
   } catch (e) {
     if (pskCacheData) {
-      send(res, 200, 'application/json', JSON.stringify({
+      const payload = {
         age: Math.round((Date.now() - pskCacheFetched) / 1000),
         fetchedAt: new Date(pskCacheFetched).toISOString(),
         byRegion: pskCacheData,
         cached: true,
         stale: true,
+      };
+      if (includeReports && pskCacheReports) payload.reports = pskCacheReports;
+      send(res, 200, 'application/json', JSON.stringify({
+        ...payload,
       }));
       return;
     }
@@ -653,7 +697,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (parts[0] === 'psk' && parts.length === 1) {
-    try { await servePsk(res); } catch (_) { send(res, 502, 'text/plain', 'PSK fetch error'); }
+    try { await servePsk(res, parsed.query || {}); } catch (_) { send(res, 502, 'text/plain', 'PSK fetch error'); }
     return;
   }
   if (parts[0] === 'health') {
