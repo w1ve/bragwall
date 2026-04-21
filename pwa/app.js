@@ -505,10 +505,10 @@ function buildModeRow(el, hasData, activeModes, modeSnr = {}) {
     qBar.className = 'mode-quality-bar';
     const qKey = MODE_QUALITY_KEY[abbr];
     const qSnr = modeSnr[qKey] ?? null;
-    const qColor = qualityColorForSnr(qSnr);
     const frac = qualityFractionForMode(qKey, qSnr);
     const pct = Math.round(frac * 100);
-    const widthPct = (qSnr != null) ? Math.max(4, pct) : 0;
+    const widthPct = (qSnr != null) ? Math.max(2, pct) : 0;
+    const qSegGradient = 'linear-gradient(90deg, #00d250 0 25%, #e6c800 25% 50%, #ff8c00 50% 75%, #dc1e1e 75% 100%)';
     if (!hasData) {
       span.className   = 'mode-label mode-dim';
       txt.textContent = abbr;
@@ -517,13 +517,13 @@ function buildModeRow(el, hasData, activeModes, modeSnr = {}) {
     } else if (active && isSSB) {
       span.className   = 'mode-label mode-ssb';
       txt.textContent = '\u2713' + abbr;
-      qBar.style.background = qColor || '#1c1c32';
+      qBar.style.background = qSegGradient;
       qBar.style.width = `${widthPct}%`;
       qBar.style.display = 'block';
     } else if (active) {
       span.className   = 'mode-label mode-active';
       txt.textContent = '\u2713' + abbr;
-      qBar.style.background = qColor || '#1c1c32';
+      qBar.style.background = qSegGradient;
       qBar.style.width = `${widthPct}%`;
       qBar.style.display = 'block';
     } else if (isSSB) {
