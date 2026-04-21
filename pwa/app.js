@@ -493,6 +493,27 @@ const DISPLAY_MODES = [
   { abbr: 'SSB', sources: ['SSB'],       isSSB: true  },
 ];
 const MODE_QUALITY_KEY = { CW: 'CW', RY: 'RTTY', FTx: 'FTx', SSB: 'SSB' };
+const MODE_QUALITY_COLORS = ['#00d250', '#e6c800', '#ff8c00', '#dc1e1e'];
+
+function buildQualityTrack(frac, enabled) {
+  const track = document.createElement('span');
+  track.className = 'mode-quality-track';
+  for (let i = 0; i < 4; i++) {
+    const seg = document.createElement('span');
+    seg.className = 'mode-quality-seg';
+    seg.style.setProperty('--seg-color', MODE_QUALITY_COLORS[i]);
+    let fill = 0;
+    if (enabled && frac > 0) {
+      const start = i * 0.25;
+      const end = start + 0.25;
+      if (frac >= end) fill = 1;
+      else if (frac > start) fill = (frac - start) / 0.25;
+    }
+    seg.style.setProperty('--seg-fill', `${Math.round(fill * 100)}%`);
+    track.appendChild(seg);
+  }
+  return track;
+}
 
 function buildModeRow(el, hasData, activeModes, modeSnr = {}) {
   el.innerHTML = '';
@@ -501,49 +522,27 @@ function buildModeRow(el, hasData, activeModes, modeSnr = {}) {
     const active = sources.some(s => activeModes.has(s));
     const txt = document.createElement('span');
     txt.className = 'mode-label-text';
-    const qBar = document.createElement('span');
-    qBar.className = 'mode-quality-bar';
     const qKey = MODE_QUALITY_KEY[abbr];
     const qSnr = modeSnr[qKey] ?? null;
     const frac = qualityFractionForMode(qKey, qSnr);
-    const pct = Math.round(frac * 100);
-    const widthPct = (qSnr != null) ? Math.max(2, pct) : 0;
-    const g = '#00d250', y = '#e6c800', o = '#ff8c00', r = '#dc1e1e';
-    let qFillColor = g;
-    if (pct >= 75) qFillColor = r;
-    else if (pct >= 50) qFillColor = o;
-    else if (pct >= 25) qFillColor = y;
+    const qTrack = buildQualityTrack(frac, hasData && active);
     if (!hasData) {
       span.className   = 'mode-label mode-dim';
       txt.textContent = abbr;
-      qBar.style.background = 'transparent';
-      qBar.style.width = '0%';
     } else if (active && isSSB) {
       span.className   = 'mode-label mode-ssb';
       txt.textContent = '\u2713' + abbr;
-      qBar.style.background = qFillColor;
-      qBar.style.width = `${widthPct}%`;
-      qBar.style.display = 'block';
     } else if (active) {
       span.className   = 'mode-label mode-active';
       txt.textContent = '\u2713' + abbr;
-      qBar.style.background = qFillColor;
-      qBar.style.width = `${widthPct}%`;
-      qBar.style.display = 'block';
     } else if (isSSB) {
       span.className   = 'mode-label mode-dim';
       txt.textContent = abbr;
-      qBar.style.background = '#1c1c32';
-      qBar.style.width = '0%';
-      qBar.style.display = 'block';
     } else {
       span.className   = 'mode-label mode-absent';
       txt.textContent = '\u2717' + abbr;
-      qBar.style.background = '#1c1c32';
-      qBar.style.width = '0%';
-      qBar.style.display = 'block';
     }
-    span.appendChild(qBar);
+    span.appendChild(qTrack);
     span.appendChild(txt);
     el.appendChild(span);
   });

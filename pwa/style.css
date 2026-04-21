@@ -245,16 +245,24 @@ h1 {
 }
 
 .mode-quality-bar {
-  display: block;
-  width: 0;
+  display: flex;
+  width: calc(100% - 2px);
   max-width: calc(100% - 2px);
   height: 3px;
   border-radius: 0;
-  background: transparent;
+  background: #1c1c32;
   opacity: 1;
   position: absolute;
   left: 1px;
   top: 1px;
+  overflow: hidden;
+}
+
+.mode-quality-seg {
+  display: block;
+  height: 100%;
+  width: 25%;
+  opacity: 0.15;
 }
 
 /* Active — white text on bright green badge */
