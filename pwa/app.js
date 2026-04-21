@@ -501,6 +501,8 @@ function buildQualityTrack(frac, enabled) {
   for (let i = 0; i < 4; i++) {
     const seg = document.createElement('span');
     seg.className = 'mode-quality-seg';
+    const fillEl = document.createElement('span');
+    fillEl.className = 'mode-quality-fill';
     let fill = 0;
     if (enabled && frac > 0) {
       const start = i * 0.25;
@@ -510,7 +512,9 @@ function buildQualityTrack(frac, enabled) {
     }
     const fillPct = Math.round(fill * 100);
     const c = MODE_QUALITY_COLORS[i];
-    seg.style.background = `linear-gradient(to right, ${c} 0 ${fillPct}%, #1c1c32 ${fillPct}% 100%)`;
+    fillEl.style.width = `${fillPct}%`;
+    fillEl.style.backgroundColor = c;
+    seg.appendChild(fillEl);
     track.appendChild(seg);
   }
   return track;
