@@ -150,6 +150,18 @@ function qualityColorForSnr(snr) {
   return '#dc1e1e';
 }
 
+function qualityFractionForMode(modeKey, snr) {
+  if (snr == null || Number.isNaN(snr)) return 0;
+  if (modeKey === 'FTx') {
+    // PSK-derived FTx quality is weak-signal centric; map roughly -20..+20 dB to 0..100%.
+    const minDb = -20;
+    const maxDb = 20;
+    return Math.max(0, Math.min((snr - minDb) / (maxDb - minDb), 1));
+  }
+  // CW/RTTY/SSB use the same 0..50 dB scale as the main S-meter.
+  return Math.max(0, Math.min(snr / MAX_SNR, 1));
+}
+
 function regionKeyForIndex(idx) {
   return REGION_KEYS[idx] || REGION_KEYS[0];
 }
@@ -491,31 +503,40 @@ function buildModeRow(el, hasData, activeModes, modeSnr = {}) {
     txt.className = 'mode-label-text';
     const qBar = document.createElement('span');
     qBar.className = 'mode-quality-bar';
-    const qSnr = modeSnr[MODE_QUALITY_KEY[abbr]] ?? null;
+    const qKey = MODE_QUALITY_KEY[abbr];
+    const qSnr = modeSnr[qKey] ?? null;
     const qColor = qualityColorForSnr(qSnr);
+    const frac = qualityFractionForMode(qKey, qSnr);
+    const pct = Math.round(frac * 100);
+    const widthPct = (qSnr != null) ? Math.max(4, pct) : 0;
     if (!hasData) {
       span.className   = 'mode-label mode-dim';
       txt.textContent = abbr;
       qBar.style.background = 'transparent';
+      qBar.style.width = '0%';
     } else if (active && isSSB) {
       span.className   = 'mode-label mode-ssb';
       txt.textContent = '\u2713' + abbr;
       qBar.style.background = qColor || '#1c1c32';
+      qBar.style.width = `${widthPct}%`;
       qBar.style.display = 'block';
     } else if (active) {
       span.className   = 'mode-label mode-active';
       txt.textContent = '\u2713' + abbr;
       qBar.style.background = qColor || '#1c1c32';
+      qBar.style.width = `${widthPct}%`;
       qBar.style.display = 'block';
     } else if (isSSB) {
       span.className   = 'mode-label mode-dim';
       txt.textContent = abbr;
       qBar.style.background = '#1c1c32';
+      qBar.style.width = '0%';
       qBar.style.display = 'block';
     } else {
       span.className   = 'mode-label mode-absent';
       txt.textContent = '\u2717' + abbr;
       qBar.style.background = '#1c1c32';
+      qBar.style.width = '0%';
       qBar.style.display = 'block';
     }
     span.appendChild(qBar);

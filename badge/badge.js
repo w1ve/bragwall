@@ -347,9 +347,9 @@ const THEMES = {
 function segColor(i, bright, t) {
   const frac = (i+1)/15;
   if (bright) {
+    // Tri-color to match the main PWA S-meter thresholds.
     if (frac < 0.60) return t.green;
     if (frac < 0.80) return t.yellow;
-    if (frac < 0.90) return t.orange;
     return t.red;
   }
   // Peak hold — dimmed versions
