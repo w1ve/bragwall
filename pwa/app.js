@@ -1461,7 +1461,6 @@ async function pollOnce() {
       spotsProcessed++;
     }
     skimmerCount = skimmersInRadius.size;
-    updateSkimmerCount(skimmerCount, true);
 
     // If no skimmers heard within radius, clear all meters immediately
     // (don't rely on slow EMA decay — give instant feedback)
@@ -1473,7 +1472,6 @@ async function pollOnce() {
   // Region mode skimmer count
   if (mode === 'region') {
     skimmerCount = regionSkimmers.size;
-    updateSkimmerCount(skimmerCount, false);
   }
 
   // Fetch PSKReporter aggregate in parallel with final UI composition.
@@ -1490,6 +1488,7 @@ async function pollOnce() {
   const fromKey = mode === 'region'
     ? regionKeyForIndex(vantageRegion)
     : (gridLL ? regionKeyForIndex(regionFromLatLon(gridLL.lat, gridLL.lon)) : null);
+  let ftxReportsInQuery = 0;
   if (fromKey && pskByRegion[fromKey]) {
     for (let ri = 0; ri < REGIONS.length; ri++) {
       const toKey = regionKeyForIndex(ri);
@@ -1497,11 +1496,30 @@ async function pollOnce() {
         const pskEntry = pskByRegion[fromKey]?.[toKey]?.[BANDS[bi].label];
         if (pskEntry && typeof pskEntry.snr === 'number') {
           modeQualityByBand[ri][bi].FTx = pskEntry.snr;
+          if (typeof pskEntry.count === 'number' && pskEntry.count > 0)
+            ftxReportsInQuery += pskEntry.count;
+
+          // Feed PSK FTx into the main S-meter: full fallback when RBN is absent,
+          // and a light blend when RBN data exists for the same cell.
+          const pskScaled = ftxSnrToRbnScale(pskEntry.snr);
+          if (pskScaled != null) {
+            const meter = meters[ri];
+            if (!sampled[ri][bi]) {
+              if (!meter.hasValue[bi] || meter.ema[bi] < pskScaled) meter.ema[bi] = pskScaled;
+              meter.hasValue[bi] = true;
+              if (meter.ema[bi] > meter.peak[bi]) meter.peak[bi] = meter.ema[bi];
+            } else if (meter.hasValue[bi]) {
+              const blended = meter.ema[bi] * 0.85 + pskScaled * 0.15;
+              meter.ema[bi] = blended;
+              if (blended > meter.peak[bi]) meter.peak[bi] = blended;
+            }
+          }
         }
       }
     }
   }
 
+  updateSkimmerCount(skimmerCount, mode === 'grid', ftxReportsInQuery);
   refreshUI(modeQualityByBand);
 
   const ts = new Date().toLocaleTimeString();
@@ -1546,14 +1564,15 @@ function setStatus(msg, cls = '') {
 }
 
 // ── Skimmer count display ─────────────────────────────────────────────────────
-function updateSkimmerCount(n, _isGrid) {
+function updateSkimmerCount(n, isGrid, ftxReports = 0) {
   const el = document.getElementById('skimmer-count');
   if (!el) return;
+  const skimmerTxt = `${n} skimmer${n === 1 ? '' : 's'} / ${ftxReports} FTx report${ftxReports === 1 ? '' : 's'}`;
+  el.textContent = skimmerTxt;
   if (n === 0) {
-    el.textContent = 'no skimmers';
-    el.className   = 'skimmer-count skimmer-none';
+    // Keep region-mode counters visually active even when currently zero.
+    el.className = isGrid ? 'skimmer-count skimmer-none' : 'skimmer-count skimmer-few';
   } else {
-    el.textContent = n === 1 ? '1 skimmer in query' : `${n} skimmers in query`;
     el.className   = n < 3 ? 'skimmer-count skimmer-few' : 'skimmer-count skimmer-ok';
   }
 }
