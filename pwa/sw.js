@@ -1,4 +1,4 @@
-const CACHE = 'hfsignals-live-v5';
+const CACHE = 'hfsignals-live-v6';
 const ASSETS = [
   './',
   './index.html',

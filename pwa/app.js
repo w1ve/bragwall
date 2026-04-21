@@ -50,6 +50,37 @@ const SEG_COLORS = {
 let pskByRegion = {};
 let pskMeta = { age: null, cached: false, stale: false };
 
+const VANTAGE_GRID_COLOR = '#ffffff';
+const REGION_LAND_KEY = ['NA', 'NA', 'NA', 'SA', 'EU', 'AF', 'AS', 'OC'];
+const WORLD_LANDMASSES = {
+  NA: [
+    [-168, 72], [-152, 62], [-135, 56], [-122, 50], [-108, 50], [-96, 46],
+    [-84, 30], [-82, 24], [-96, 16], [-112, 22], [-128, 30], [-138, 42],
+    [-152, 54], [-165, 66],
+  ],
+  SA: [
+    [-82, 12], [-74, 8], [-68, -2], [-64, -15], [-60, -28], [-62, -42],
+    [-70, -55], [-76, -46], [-80, -30], [-82, -12],
+  ],
+  EU: [
+    [-11, 36], [0, 43], [12, 49], [22, 53], [34, 58], [30, 66],
+    [16, 64], [6, 58], [-2, 52], [-9, 44],
+  ],
+  AF: [
+    [-18, 35], [2, 35], [20, 30], [35, 20], [46, 4], [42, -17],
+    [32, -35], [12, -35], [-2, -29], [-11, -12], [-16, 8], [-18, 24],
+  ],
+  AS: [
+    [35, 5], [50, 10], [66, 20], [82, 24], [98, 20], [112, 30],
+    [126, 40], [142, 50], [162, 58], [172, 50], [162, 34], [148, 20],
+    [132, 10], [114, 2], [96, -4], [76, -1], [60, 1], [46, 3],
+  ],
+  OC: [
+    [110, -11], [124, -16], [138, -24], [153, -31], [150, -42], [134, -45],
+    [120, -40], [112, -29],
+  ],
+};
+
 // ── Mode normalisation ────────────────────────────────────────────────────────
 function normaliseMode(raw) {
   const u = (raw || '').toUpperCase();
@@ -124,6 +155,197 @@ function distanceMiles(lat1, lon1, lat2, lon2) {
   const a = Math.sin(dLat/2)**2 +
             Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function normalizeLonDelta(delta) {
+  let out = delta;
+  while (out > 180) out -= 360;
+  while (out < -180) out += 360;
+  return out;
+}
+
+function prepareHiDPICanvas(canvas) {
+  if (!canvas) return null;
+  const cssW = Math.max(1, Math.round(canvas.clientWidth));
+  const cssH = Math.max(1, Math.round(canvas.clientHeight));
+  if (cssW < 2 || cssH < 2) return null;
+  const dpr = window.devicePixelRatio || 1;
+  const pxW = Math.max(1, Math.round(cssW * dpr));
+  const pxH = Math.max(1, Math.round(cssH * dpr));
+  if (canvas.width !== pxW || canvas.height !== pxH) {
+    canvas.width = pxW;
+    canvas.height = pxH;
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  return { ctx, w: cssW, h: cssH };
+}
+
+function drawMapBackground(ctx, w, h) {
+  ctx.fillStyle = 'rgba(10, 16, 28, 0.92)';
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = 'rgba(0, 212, 170, 0.16)';
+  ctx.lineWidth = 1;
+}
+
+function drawGeoGrid(ctx, w, h, project, lonStep, latStep) {
+  ctx.strokeStyle = 'rgba(0, 212, 170, 0.12)';
+  ctx.lineWidth = 1;
+  for (let lon = -180; lon <= 180; lon += lonStep) {
+    const a = project(lon, -85);
+    const b = project(lon, 85);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+  for (let lat = -60; lat <= 60; lat += latStep) {
+    const a = project(-180, lat);
+    const b = project(180, lat);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+}
+
+function drawPolygon(ctx, points, project, fillStyle, strokeStyle, lineWidth = 1) {
+  if (!points || points.length < 3) return;
+  ctx.beginPath();
+  points.forEach(([lon, lat], i) => {
+    const p = project(lon, lat);
+    if (i === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  });
+  ctx.closePath();
+  if (fillStyle) {
+    ctx.fillStyle = fillStyle;
+    ctx.fill();
+  }
+  if (strokeStyle) {
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+  }
+}
+
+function drawWorldLandmasses(ctx, project, fillAlpha = 0.24, strokeAlpha = 0.46) {
+  Object.values(WORLD_LANDMASSES).forEach((points) => {
+    drawPolygon(
+      ctx,
+      points,
+      project,
+      `rgba(0, 210, 80, ${fillAlpha})`,
+      `rgba(0, 169, 107, ${strokeAlpha})`,
+      1,
+    );
+  });
+}
+
+function drawRegionVantageMap(canvas, regionIdx) {
+  const setup = prepareHiDPICanvas(canvas);
+  if (!setup) return;
+  const { ctx, w, h } = setup;
+  const project = (lon, lat) => ({
+    x: ((lon + 180) / 360) * w,
+    y: ((90 - lat) / 180) * h,
+  });
+  drawMapBackground(ctx, w, h);
+  drawGeoGrid(ctx, w, h, project, 30, 20);
+  drawWorldLandmasses(ctx, project, 0.15, 0.25);
+
+  const landKey = REGION_LAND_KEY[regionIdx];
+  const points = WORLD_LANDMASSES[landKey];
+  if (!points) return;
+
+  if (landKey === 'NA' && regionIdx >= 0 && regionIdx <= 2) {
+    const px = points.map(([lon, lat]) => project(lon, lat));
+    const xs = px.map(p => p.x);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const segW = (maxX - minX) / 3;
+    const segment = regionIdx === 2 ? 0 : (regionIdx === 1 ? 1 : 2); // W, C, E
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(minX + segW * segment, 0, segW, h);
+    ctx.clip();
+    drawPolygon(ctx, points, project, 'rgba(0, 210, 80, 0.76)', 'rgba(0, 169, 107, 0.94)', 1.6);
+    ctx.restore();
+
+    // Subtle NA thirds guides.
+    ctx.strokeStyle = 'rgba(255,255,255,0.24)';
+    ctx.lineWidth = 1;
+    for (let i = 1; i <= 2; i++) {
+      const x = minX + segW * i;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, h);
+      ctx.stroke();
+    }
+  } else {
+    drawPolygon(ctx, points, project, 'rgba(0, 210, 80, 0.76)', 'rgba(0, 169, 107, 0.94)', 1.6);
+  }
+}
+
+function drawGridVantageMap(canvas, grid, radiusMiles, radiusLabel) {
+  const setup = prepareHiDPICanvas(canvas);
+  if (!setup) return;
+  const { ctx, w, h } = setup;
+  const center = gridToLatLon(grid);
+  drawMapBackground(ctx, w, h);
+
+  if (!center) {
+    const project = (lon, lat) => ({ x: ((lon + 180) / 360) * w, y: ((90 - lat) / 180) * h });
+    drawGeoGrid(ctx, w, h, project, 60, 30);
+    drawWorldLandmasses(ctx, project, 0.22, 0.38);
+    ctx.fillStyle = 'rgba(255,255,255,0.86)';
+    ctx.font = '12px "Share Tech Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Enter valid grid square', w / 2, h / 2);
+    return;
+  }
+
+  const radiusDegLat = Math.max(0.5, radiusMiles / 69);
+  const radiusPxAt1x = radiusDegLat * (h / 180);
+  const targetRadiusPx = Math.max(26, Math.min(78, h * 0.24));
+  const zoom = Math.max(1, Math.min(7, targetRadiusPx / Math.max(radiusPxAt1x, 1)));
+  const lonScale = (w / 360) * zoom;
+  const latScale = (h / 180) * zoom;
+  const project = (lon, lat) => ({
+    x: w / 2 + normalizeLonDelta(lon - center.lon) * lonScale,
+    y: h / 2 - (lat - center.lat) * latScale,
+  });
+
+  const lonStep = zoom >= 3.2 ? 15 : (zoom >= 1.8 ? 30 : 60);
+  const latStep = zoom >= 3.2 ? 10 : (zoom >= 1.8 ? 20 : 30);
+  drawGeoGrid(ctx, w, h, project, lonStep, latStep);
+  drawWorldLandmasses(ctx, project, 0.26, 0.42);
+
+  const radiusPx = Math.max(4, radiusDegLat * latScale);
+  ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.arc(w / 2, h / 2, radiusPx, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.fillStyle = VANTAGE_GRID_COLOR;
+  ctx.beginPath();
+  ctx.arc(w / 2, h / 2, 3.8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  const lx = Math.min(w - 8, w / 2 + radiusPx + 10);
+  const ly = Math.max(14, h / 2 - 8);
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(255,255,255,0.94)';
+  ctx.font = 'bold 12px "Share Tech Mono", monospace';
+  ctx.fillText(grid.toUpperCase(), lx, ly);
+  ctx.font = '11px "Share Tech Mono", monospace';
+  ctx.fillText(radiusLabel, lx, ly + 14);
 }
 
 // ── S-unit label ──────────────────────────────────────────────────────────────
@@ -1140,24 +1362,54 @@ function updateSkimmerCount(n, isGrid) {
   }
 }
 
-function vantagePointText() {
+function currentVantageState() {
   const mode = document.querySelector('input[name="vantage-mode"]:checked')?.value || 'region';
   if (mode === 'grid') {
     const grid = document.getElementById('grid-input').value.trim().toUpperCase();
     const radiusSelect = document.getElementById('radius-select');
     const radius = radiusSelect ? (RADIUS_VALUES[radiusSelect.selectedIndex] ?? 500) : 500;
     const unit = getUnit();
-    const label = grid || '--';
-    return `${label} (${radius} ${unit})`;
+    const radiusMiles = getRadiusMiles();
+    return {
+      mode,
+      grid,
+      radius,
+      unit,
+      radiusMiles,
+      radiusLabel: `${radius} ${unit}`,
+      regionIdx: parseInt(document.getElementById('region-select').value, 10) || 0,
+    };
   }
-  const regionIdx = parseInt(document.getElementById('region-select').value, 10);
-  return REGIONS[regionIdx] || REGIONS[0];
+  return {
+    mode,
+    regionIdx: parseInt(document.getElementById('region-select').value, 10) || 0,
+    grid: '',
+    radius: 0,
+    unit: getUnit(),
+    radiusMiles: getRadiusMiles(),
+    radiusLabel: '',
+  };
+}
+
+function vantagePointText() {
+  const v = currentVantageState();
+  if (v.mode === 'grid') {
+    const label = v.grid || '--';
+    return `${label} (${v.radius} ${v.unit})`;
+  }
+  return REGIONS[v.regionIdx] || REGIONS[0];
 }
 
 function updateVantageDisplay() {
   const el = document.getElementById('vantage-point-text');
+  const canvas = document.getElementById('vantage-map-canvas');
   if (!el) return;
+  const v = currentVantageState();
   el.textContent = vantagePointText();
+  if (canvas) {
+    if (v.mode === 'grid') drawGridVantageMap(canvas, v.grid, v.radiusMiles, v.radiusLabel);
+    else drawRegionVantageMap(canvas, v.regionIdx);
+  }
 }
 
 // ── Auto-update grid from GPS ─────────────────────────────────────────────────
@@ -1380,6 +1632,14 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-start').addEventListener('click', startPolling);
   document.getElementById('btn-stop').addEventListener('click', stopPolling);
   document.getElementById('btn-reset').addEventListener('click', resetMeters);
+
+  // Keep vantage graphics crisp whenever viewport dimensions change.
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => updateVantageDisplay(), 80);
+  });
+  requestAnimationFrame(updateVantageDisplay);
 
   // Space weather + UTC clock
   updateUTC();
