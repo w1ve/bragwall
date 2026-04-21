@@ -248,7 +248,7 @@ h1 {
   display: block;
   width: 0;
   max-width: calc(100% - 2px);
-  height: 2px;
+  height: 3px;
   border-radius: 0;
   background: linear-gradient(
     to right,
