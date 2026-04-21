@@ -162,6 +162,16 @@ function qualityFractionForMode(modeKey, snr) {
   return Math.max(0, Math.min(snr / MAX_SNR, 1));
 }
 
+function ftxSnrToRbnScale(ftxSnr) {
+  if (ftxSnr == null || Number.isNaN(ftxSnr)) return null;
+  // PSK FTx values are normalized (+7 dB) but still represent digital weak-signal behavior.
+  // Map -20..+20 dB to a conservative 2..22 dB contribution on the main 0..50 RBN meter.
+  const minDb = -20;
+  const maxDb = 20;
+  const frac = Math.max(0, Math.min((ftxSnr - minDb) / (maxDb - minDb), 1));
+  return 2 + frac * 20;
+}
+
 function regionKeyForIndex(idx) {
   return REGION_KEYS[idx] || REGION_KEYS[0];
 }
