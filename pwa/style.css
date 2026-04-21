@@ -350,8 +350,16 @@ h1 {
   background: var(--bg2);
   border-top: 1px solid rgba(0,212,170,0.15);
   border-bottom: 1px solid rgba(0,212,170,0.25);
+  border-left: 1px solid rgba(0,212,170,0.15);
+  border-right: 1px solid rgba(0,212,170,0.15);
   padding: 8px 12px 7px;
   text-align: center;
+  width: 300px;
+  min-width: 300px;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .vantage-display-label {
@@ -372,7 +380,7 @@ h1 {
 
 .desktop-main {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 8px;
   padding: 8px 8px 0;
 }
@@ -389,6 +397,8 @@ h1 {
   border-radius: 4px;
   background: rgba(13,13,26,0.35);
   padding: 7px 6px;
+  align-self: stretch;
+  justify-content: center;
 }
 
 .sw-item {
@@ -425,7 +435,15 @@ h1 {
 }
 
 @media (max-width: 599px) {
-  .vantage-display { padding: 6px 10px; }
+  .vantage-display {
+    width: auto;
+    min-width: 0;
+    align-self: auto;
+    display: block;
+    padding: 6px 10px;
+    border-left: none;
+    border-right: none;
+  }
   .vantage-display-label { font-size: 13px; }
   .vantage-display-value { font-size: 14px; }
   .desktop-main { display: block; padding: 0 10px; }
