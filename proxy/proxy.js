@@ -21,6 +21,102 @@ const spotMap = new Map();
 const REGION_KEYS = ['ENA', 'CNA', 'WNA', 'SA', 'EU', 'AF', 'AS', 'OC', 'CAR'];
 const CARIBBEAN_CENTER = { lat: 17.0, lon: -72.0, radiusMiles: 950 };
 const MAX_PSK_CALLS_PER_CELL = parseInt(process.env.PSK_MAX_CALLS_PER_CELL || '120', 10);
+const CALLSIGN_REGION_PREFIXES = [
+  // Caribbean
+  ['VP2E', 'CAR'], ['VP2V', 'CAR'], ['VP2M', 'CAR'], ['VP5', 'CAR'], ['VP9', 'CAR'],
+  ['KP2', 'CAR'], ['NP2', 'CAR'], ['WP2', 'CAR'], ['KP4', 'CAR'], ['NP4', 'CAR'], ['WP4', 'CAR'],
+  ['PJ2', 'CAR'], ['PJ4', 'CAR'], ['PJ', 'CAR'], ['C6', 'CAR'], ['ZF', 'CAR'],
+  ['V2', 'CAR'], ['V3', 'CAR'], ['V4', 'CAR'], ['J3', 'CAR'], ['J6', 'CAR'], ['J7', 'CAR'], ['J8', 'CAR'],
+  ['8P', 'CAR'], ['9Y', 'CAR'], ['9Z', 'CAR'], ['6Y', 'CAR'], ['4V', 'CAR'],
+  ['HH', 'CAR'], ['HI', 'CAR'], ['CL', 'CAR'], ['CM', 'CAR'], ['CO', 'CAR'], ['T4', 'CAR'],
+  ['FG', 'CAR'], ['FM', 'CAR'], ['FS', 'CAR'], ['FJ', 'CAR'],
+  // East North America
+  ['VO1', 'ENA'], ['VO2', 'ENA'], ['VY2', 'ENA'],
+  ['VE1', 'ENA'], ['VE2', 'ENA'], ['VE3', 'ENA'], ['VE9', 'ENA'],
+  ['VA1', 'ENA'], ['VA2', 'ENA'], ['VA3', 'ENA'],
+  ['W1', 'ENA'], ['W2', 'ENA'], ['W3', 'ENA'], ['W4', 'ENA'], ['W8', 'ENA'],
+  ['K1', 'ENA'], ['K2', 'ENA'], ['K3', 'ENA'], ['K4', 'ENA'], ['K8', 'ENA'],
+  ['N1', 'ENA'], ['N2', 'ENA'], ['N3', 'ENA'], ['N4', 'ENA'], ['N8', 'ENA'],
+  // Central North America
+  ['VE4', 'CNA'], ['VE5', 'CNA'], ['VE6', 'CNA'],
+  ['VA4', 'CNA'], ['VA5', 'CNA'], ['VA6', 'CNA'],
+  ['W0', 'CNA'], ['W5', 'CNA'], ['W9', 'CNA'],
+  ['K0', 'CNA'], ['K5', 'CNA'], ['K9', 'CNA'],
+  ['N0', 'CNA'], ['N5', 'CNA'], ['N9', 'CNA'],
+  ['XE', 'CNA'], ['XF', 'CNA'], ['TI', 'CNA'], ['YN', 'CNA'], ['HR', 'CNA'], ['TG', 'CNA'], ['YS', 'CNA'],
+  // West North America
+  ['VE7', 'WNA'], ['VA7', 'WNA'], ['VY1', 'WNA'],
+  ['W6', 'WNA'], ['W7', 'WNA'], ['K6', 'WNA'], ['K7', 'WNA'], ['N6', 'WNA'], ['N7', 'WNA'],
+  ['KL', 'WNA'], ['AL', 'WNA'], ['WL', 'WNA'], ['NL', 'WNA'],
+  // South America
+  ['VP8', 'SA'], ['FY', 'SA'], ['PZ', 'SA'], ['8R', 'SA'], ['OA', 'SA'], ['OC', 'SA'],
+  ['AY', 'SA'], ['AZ', 'SA'], ['LU', 'SA'], ['LO', 'SA'], ['LW', 'SA'],
+  ['PP', 'SA'], ['PQ', 'SA'], ['PR', 'SA'], ['PS', 'SA'], ['PT', 'SA'], ['PU', 'SA'], ['PV', 'SA'], ['PW', 'SA'], ['PX', 'SA'], ['PY', 'SA'],
+  ['CA', 'SA'], ['CB', 'SA'], ['CC', 'SA'], ['CD', 'SA'], ['CE', 'SA'], ['CF', 'SA'], ['CK', 'SA'],
+  ['XQ', 'SA'], ['XR', 'SA'], ['CP', 'SA'], ['ZY', 'SA'], ['ZZ', 'SA'],
+  ['HK', 'SA'], ['HJ', 'SA'], ['HC', 'SA'], ['HD', 'SA'], ['ZP', 'SA'], ['CV', 'SA'], ['CX', 'SA'],
+  ['YV', 'SA'], ['YY', 'SA'],
+  // Europe
+  ['1A0', 'EU'], ['3A', 'EU'], ['4O', 'EU'], ['9A', 'EU'], ['9H', 'EU'], ['CT', 'EU'], ['C31', 'EU'],
+  ['DL', 'EU'], ['E7', 'EU'], ['EA6', 'EU'], ['EA', 'EU'], ['EI', 'EU'], ['ES', 'EU'], ['F', 'EU'],
+  ['GD', 'EU'], ['GI', 'EU'], ['GJ', 'EU'], ['GM', 'EU'], ['GU', 'EU'], ['GW', 'EU'], ['G', 'EU'],
+  ['HB0', 'EU'], ['HB', 'EU'], ['HV', 'EU'], ['I', 'EU'], ['JW', 'EU'], ['JX', 'EU'], ['LA', 'EU'],
+  ['LZ', 'EU'], ['OE', 'EU'], ['OH0', 'EU'], ['OH', 'EU'], ['OK', 'EU'], ['OM', 'EU'], ['ON', 'EU'],
+  ['OY', 'EU'], ['OZ', 'EU'], ['PA', 'EU'], ['S5', 'EU'], ['SM', 'EU'],
+  ['SV5', 'EU'], ['SV9', 'EU'], ['SV', 'EU'], ['T7', 'EU'], ['TA', 'EU'], ['TF', 'EU'], ['TK', 'EU'],
+  ['UR', 'EU'], ['YL', 'EU'], ['YO', 'EU'], ['YU', 'EU'], ['ZA', 'EU'], ['ZB', 'EU'], ['ZC4', 'EU'],
+  ['5B', 'EU'], ['C4', 'EU'], ['H2', 'EU'], ['P3', 'EU'],
+  // Africa
+  ['EA8', 'AF'], ['EH8', 'AF'], ['EA9', 'AF'], ['EB9', 'AF'], ['EC9', 'AF'], ['ED9', 'AF'], ['EE9', 'AF'], ['EF9', 'AF'], ['EG9', 'AF'], ['EH9', 'AF'],
+  ['CT3', 'AF'], ['CT9', 'AF'], ['CQ3', 'AF'], ['CQ9', 'AF'], ['CR3', 'AF'], ['CR9', 'AF'], ['CS3', 'AF'], ['CS9', 'AF'],
+  ['7R', 'AF'], ['7T', 'AF'], ['7U', 'AF'], ['7V', 'AF'], ['7W', 'AF'], ['7X', 'AF'], ['7Y', 'AF'],
+  ['6AA', 'AF'], ['6AB', 'AF'], ['6AC', 'AF'], ['6AD', 'AF'], ['6AE', 'AF'], ['6AF', 'AF'], ['6AG', 'AF'], ['6AH', 'AF'], ['6AI', 'AF'], ['6AJ', 'AF'], ['6AK', 'AF'], ['6AL', 'AF'], ['6AM', 'AF'], ['6AN', 'AF'], ['6AO', 'AF'], ['6AP', 'AF'], ['6AQ', 'AF'], ['6AR', 'AF'], ['6AS', 'AF'], ['6AT', 'AF'], ['6AU', 'AF'], ['6AV', 'AF'], ['6AW', 'AF'], ['6AX', 'AF'], ['6AY', 'AF'], ['6AZ', 'AF'],
+  ['6BA', 'AF'], ['6BB', 'AF'], ['6BC', 'AF'], ['6BD', 'AF'], ['6BE', 'AF'], ['6BF', 'AF'], ['6BG', 'AF'], ['6BH', 'AF'], ['6BI', 'AF'], ['6BJ', 'AF'], ['6BK', 'AF'], ['6BL', 'AF'], ['6BM', 'AF'], ['6BN', 'AF'], ['6BO', 'AF'], ['6BP', 'AF'], ['6BQ', 'AF'], ['6BR', 'AF'], ['6BS', 'AF'], ['6BT', 'AF'], ['6BU', 'AF'], ['6BV', 'AF'], ['6BW', 'AF'], ['6BX', 'AF'], ['6BY', 'AF'], ['6BZ', 'AF'],
+  ['SSA', 'AF'], ['SSB', 'AF'], ['SSC', 'AF'], ['SSD', 'AF'], ['SSE', 'AF'], ['SSF', 'AF'], ['SSG', 'AF'], ['SSH', 'AF'], ['SSI', 'AF'], ['SSJ', 'AF'], ['SSK', 'AF'], ['SSL', 'AF'], ['SSM', 'AF'], ['SSN', 'AF'],
+  ['5A', 'AF'], ['CN', 'AF'], ['5C', 'AF'], ['5D', 'AF'], ['5E', 'AF'], ['5F', 'AF'], ['5G', 'AF'],
+  ['Z8', 'AF'], ['ST', 'AF'], ['3V', 'AF'], ['TS', 'AF'], ['S0', 'AF'],
+  ['TY', 'AF'], ['XT', 'AF'], ['TJ', 'AF'], ['D4', 'AF'], ['TL', 'AF'], ['TT', 'AF'], ['TU', 'AF'],
+  ['9O', 'AF'], ['9P', 'AF'], ['9Q', 'AF'], ['9R', 'AF'], ['9S', 'AF'], ['9T', 'AF'],
+  ['3C0', 'AF'], ['3C', 'AF'], ['TR', 'AF'], ['C5', 'AF'], ['9G', 'AF'], ['3X', 'AF'], ['J5', 'AF'],
+  ['A8', 'AF'], ['D5', 'AF'], ['EL', 'AF'], ['5L', 'AF'], ['5M', 'AF'], ['6Z', 'AF'], ['TZ', 'AF'], ['5T', 'AF'], ['5U', 'AF'],
+  ['5N', 'AF'], ['5O', 'AF'], ['TN', 'AF'], ['S9', 'AF'], ['6V', 'AF'], ['6W', 'AF'], ['9L', 'AF'], ['ZD7', 'AF'], ['ZD8', 'AF'], ['5V', 'AF'],
+  ['D2', 'AF'], ['D3', 'AF'], ['A2', 'AF'], ['8O', 'AF'], ['9U', 'AF'], ['D6', 'AF'], ['J2', 'AF'], ['E3', 'AF'], ['3DA0', 'AF'],
+  ['ET', 'AF'], ['9E', 'AF'], ['9F', 'AF'], ['5Y', 'AF'], ['5Z', 'AF'], ['7P', 'AF'], ['5R', 'AF'], ['5S', 'AF'], ['6X', 'AF'],
+  ['7Q', 'AF'], ['3B', 'AF'], ['C8', 'AF'], ['C9', 'AF'], ['V5', 'AF'], ['9X', 'AF'], ['S7', 'AF'], ['6O', 'AF'], ['T5', 'AF'],
+  ['ZR', 'AF'], ['ZS', 'AF'], ['ZT', 'AF'], ['ZU', 'AF'], ['5H', 'AF'], ['5I', 'AF'], ['ZD9', 'AF'], ['5X', 'AF'], ['9I', 'AF'], ['9J', 'AF'], ['Z2', 'AF'],
+  // Asia (incl. Middle East)
+  ['A9', 'AS'], ['EP', 'AS'], ['EQ', 'AS'], ['9B', 'AS'], ['9C', 'AS'], ['9D', 'AS'], ['YI', 'AS'], ['HN', 'AS'],
+  ['4X', 'AS'], ['4Z', 'AS'], ['JY', 'AS'], ['9K', 'AS'], ['OD', 'AS'], ['A4', 'AS'], ['E4', 'AS'], ['A7', 'AS'],
+  ['HZ', 'AS'], ['7Z', 'AS'], ['8Z', 'AS'], ['YK', 'AS'], ['6C', 'AS'], ['7O', 'AS'],
+  ['T6', 'AS'], ['YA', 'AS'], ['S2', 'AS'], ['S3', 'AS'], ['A5', 'AS'], ['V8', 'AS'], ['XU', 'AS'],
+  ['XS', 'AS'], ['3H', 'AS'], ['3I', 'AS'], ['3J', 'AS'], ['3K', 'AS'], ['3L', 'AS'], ['3M', 'AS'], ['3N', 'AS'], ['3O', 'AS'], ['3P', 'AS'], ['3Q', 'AS'], ['3R', 'AS'], ['3S', 'AS'], ['3T', 'AS'], ['3U', 'AS'],
+  ['B', 'AS'], ['VR', 'AS'], ['XX', 'AS'], ['AT', 'AS'], ['AU', 'AS'], ['AV', 'AS'], ['AW', 'AS'], ['VT', 'AS'], ['VU', 'AS'], ['VW', 'AS'], ['8T', 'AS'], ['8Y', 'AS'],
+  ['7A', 'AS'], ['7B', 'AS'], ['7C', 'AS'], ['7D', 'AS'], ['7E', 'AS'], ['7F', 'AS'], ['7G', 'AS'], ['7H', 'AS'], ['7I', 'AS'],
+  ['8A', 'AS'], ['8B', 'AS'], ['8C', 'AS'], ['8D', 'AS'], ['8E', 'AS'], ['8F', 'AS'], ['8G', 'AS'], ['8H', 'AS'], ['8I', 'AS'],
+  ['YB', 'AS'], ['YC', 'AS'], ['YD', 'AS'], ['YE', 'AS'], ['YF', 'AS'], ['YG', 'AS'], ['YH', 'AS'],
+  ['JA', 'AS'], ['JB', 'AS'], ['JC', 'AS'], ['JD', 'AS'], ['JE', 'AS'], ['JF', 'AS'], ['JG', 'AS'], ['JH', 'AS'], ['JI', 'AS'], ['JJ', 'AS'], ['JK', 'AS'], ['JL', 'AS'], ['JM', 'AS'], ['JN', 'AS'], ['JO', 'AS'], ['JP', 'AS'], ['JQ', 'AS'], ['JR', 'AS'], ['JS', 'AS'],
+  ['7J', 'AS'], ['7K', 'AS'], ['7L', 'AS'], ['7M', 'AS'], ['7N', 'AS'], ['8J', 'AS'], ['8K', 'AS'], ['8L', 'AS'], ['8M', 'AS'], ['8N', 'AS'],
+  ['UN', 'AS'], ['UO', 'AS'], ['UP', 'AS'], ['UQ', 'AS'], ['EX', 'AS'], ['XW', 'AS'], ['9M', 'AS'], ['9W', 'AS'], ['8Q', 'AS'],
+  ['JT', 'AS'], ['JU', 'AS'], ['JV', 'AS'], ['XY', 'AS'], ['XZ', 'AS'], ['9N', 'AS'],
+  ['HM', 'AS'], ['P5', 'AS'], ['P6', 'AS'], ['P7', 'AS'], ['P8', 'AS'], ['P9', 'AS'],
+  ['AP', 'AS'], ['AQ', 'AS'], ['AR', 'AS'], ['AS', 'AS'], ['6P', 'AS'], ['6Q', 'AS'], ['6R', 'AS'], ['6S', 'AS'],
+  ['DU', 'AS'], ['DV', 'AS'], ['DW', 'AS'], ['DX', 'AS'], ['DY', 'AS'], ['DZ', 'AS'], ['4D', 'AS'], ['4E', 'AS'], ['4F', 'AS'], ['4G', 'AS'], ['4H', 'AS'], ['4I', 'AS'],
+  ['9V', 'AS'], ['S6', 'AS'],
+  ['HL', 'AS'], ['DS', 'AS'], ['DT', 'AS'], ['D7', 'AS'], ['D8', 'AS'], ['D9', 'AS'], ['6K', 'AS'], ['6L', 'AS'], ['6M', 'AS'], ['6N', 'AS'],
+  ['4P', 'AS'], ['4Q', 'AS'], ['4R', 'AS'], ['4S', 'AS'], ['BV', 'AS'], ['EY', 'AS'], ['HS', 'AS'], ['E2', 'AS'],
+  ['4W', 'AS'], ['EZ', 'AS'], ['UJ', 'AS'], ['UK', 'AS'], ['UL', 'AS'], ['UM', 'AS'],
+  ['XV', 'AS'], ['3W', 'AS'], ['UA9', 'AS'], ['UA0', 'AS'], ['R9', 'AS'], ['R0', 'AS'],
+  // Oceania
+  ['AH8', 'OC'], ['KH8', 'OC'], ['NH8', 'OC'], ['WH8', 'OC'], ['AH1', 'OC'], ['KH1', 'OC'], ['NH1', 'OC'], ['WH1', 'OC'],
+  ['ZL7', 'OC'], ['3D2', 'OC'], ['ZK1', 'OC'], ['T32', 'OC'], ['CE0', 'OC'], ['XQ0', 'OC'], ['XR0', 'OC'],
+  ['V6', 'OC'], ['FO', 'OC'], ['TX', 'OC'], ['AH2', 'OC'], ['KH2', 'OC'], ['NH2', 'OC'], ['WH2', 'OC'],
+  ['AH6', 'OC'], ['AH7', 'OC'], ['KH6', 'OC'], ['KH7', 'OC'], ['NH6', 'OC'], ['NH7', 'OC'], ['WH6', 'OC'], ['WH7', 'OC'],
+  ['AH3', 'OC'], ['KH3', 'OC'], ['NH3', 'OC'], ['WH3', 'OC'], ['ZL8', 'OC'], ['KH5K', 'OC'],
+  ['T33', 'OC'], ['T3', 'OC'], ['KH7K', 'OC'], ['VK0', 'OC'], ['V7', 'OC'], ['C2', 'OC'], ['FK', 'OC'],
+  ['ZL', 'OC'], ['E6', 'OC'], ['AH0', 'OC'], ['KH0', 'OC'], ['NH0', 'OC'], ['WH0', 'OC'],
+  ['T8', 'OC'], ['P2', 'OC'], ['VP6', 'OC'], ['5W', 'OC'], ['H4', 'OC'], ['H40', 'OC'], ['A3', 'OC'],
+  ['T2', 'OC'], ['YJ', 'OC'], ['AH9', 'OC'], ['KH9', 'OC'], ['NH9', 'OC'], ['WH9', 'OC'], ['FW', 'OC'], ['VK', 'OC'],
+].sort((a, b) => b[0].length - a[0].length);
 const BANDS = [
   { label: '160m', min: 1800,  max: 2000  },
   { label: '80m',  min: 3500,  max: 4000  },
@@ -229,6 +325,47 @@ function regionFromLatLon(lat, lon) {
   return null;
 }
 
+function callsignCandidates(call) {
+  const raw = String(call || '').toUpperCase().trim();
+  if (!raw) return [];
+  const parts = raw.split('/').map((s) => s.replace(/[^A-Z0-9]/g, '')).filter(Boolean);
+  if (parts.length === 0) return [];
+  const seen = new Set();
+  const ordered = [];
+  for (const p of parts) {
+    if (!seen.has(p)) {
+      seen.add(p);
+      ordered.push(p);
+    }
+  }
+  return ordered;
+}
+
+function regionFromUsCallsign(baseCall) {
+  const c = String(baseCall || '');
+  if (!/^(?:[WKN][0-9]|A[A-L][0-9])/.test(c)) return null;
+  for (const ch of c) {
+    if (ch < '0' || ch > '9') continue;
+    const d = parseInt(ch, 10);
+    if (d === 0 || d === 5 || d === 9) return 'CNA';
+    if (d === 6 || d === 7) return 'WNA';
+    return 'ENA';
+  }
+  return null;
+}
+
+function classifyCallsignRegion(call) {
+  const candidates = callsignCandidates(call);
+  for (const c of candidates) {
+    for (const [pfx, region] of CALLSIGN_REGION_PREFIXES) {
+      if (c.startsWith(pfx)) return region;
+    }
+    const usRegion = regionFromUsCallsign(c);
+    if (usRegion) return usRegion;
+  }
+  return null;
+}
+
 function bandForFrequencyKhz(freqKhz) {
   for (const band of BANDS) {
     if (freqKhz >= band.min && freqKhz <= band.max) return band.label;
@@ -259,7 +396,7 @@ function parsePskReports(xmlText) {
     const freqRaw = attrs.frequency || attrs.freq;
     const snr = parseFloat(snrRaw);
     const freq = parseFloat(freqRaw);
-    if (!rxGrid || !txGrid || Number.isNaN(snr) || Number.isNaN(freq)) continue;
+    if (Number.isNaN(snr) || Number.isNaN(freq)) continue;
     reports.push({ rxGrid, txGrid, rxCall, txCall, snr, freq });
   }
   return reports;
@@ -270,9 +407,8 @@ function foldPskReports(reports) {
   for (const r of reports) {
     const rxLL = gridToLatLon(r.rxGrid);
     const txLL = gridToLatLon(r.txGrid);
-    if (!rxLL || !txLL) continue;
-    const fromRegion = regionFromLatLon(rxLL.lat, rxLL.lon);
-    const toRegion = regionFromLatLon(txLL.lat, txLL.lon);
+    const fromRegion = classifyCallsignRegion(r.rxCall) || (rxLL ? regionFromLatLon(rxLL.lat, rxLL.lon) : null);
+    const toRegion = classifyCallsignRegion(r.txCall) || (txLL ? regionFromLatLon(txLL.lat, txLL.lon) : null);
     if (!REGION_KEYS.includes(fromRegion) || !REGION_KEYS.includes(toRegion)) continue;
 
     const freqKhz = r.freq >= 100000 ? r.freq / 1000 : r.freq;
