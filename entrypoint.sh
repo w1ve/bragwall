@@ -7,7 +7,7 @@ SKIP_CERTBOT="${SKIP_CERTBOT:-false}"
 STRENGTH_DOMAIN="${STRENGTH_DOMAIN:-rbnstrength.rm.gl}"
 
 echo "======================================"
-echo "  RBN S-Meter + RBNStrength"
+echo "  hfsignals.live + RBNStrength"
 echo "  Domain          : ${DOMAIN}"
 echo "  Strength Domain : ${STRENGTH_DOMAIN}"
 echo "  Certbot         : ${SKIP_CERTBOT}"

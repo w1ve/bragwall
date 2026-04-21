@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * RBN S-Meter Badge API
+ * HFSignals.live Badge API
  *
  * Endpoints:
  *   GET /badge/region?from=NA&to=EU&band=20m&theme=dark|light&size=small|full
@@ -10,7 +10,7 @@
  * Returns a PNG image suitable for embedding in web pages via <img> tags.
  *
  * Caching:
- *   - RBN data is fetched once and shared across all requests
+ *   - Spot data is fetched once and shared across all requests
  *   - Data is refreshed every 60 seconds
  *   - Rendered PNGs are cached per parameter set for up to 10 minutes
  *   - Images older than 30 minutes are deleted
@@ -26,11 +26,11 @@ const url     = require('url');
 const { createCanvas } = require('canvas');
 
 const PORT         = process.env.PORT || 3002;
-const DATA_TTL_MS  = 60  * 1000;   // re-fetch RBN data every 60s
+const DATA_TTL_MS  = 60  * 1000;   // re-fetch spot data every 60s
 const CACHE_TTL_MS = 10  * 60 * 1000;  // reuse rendered PNG for 10 min
 const MAX_AGE_MS   = 30  * 60 * 1000;  // delete cached images older than 30 min
 
-// Use the internal proxy which has live RBN telnet feed data
+// Use the internal proxy which has live spot feed data
 const RBN_URL = process.env.RBN_PROXY_URL || 'http://rbn-smeter:3001/rbn';
 
 // ── Shared RBN data state ─────────────────────────────────────────────────────
@@ -468,7 +468,7 @@ function drawBadgePanel(ctx, { snr, modes, hasData, fromLabel, toLabel, bandLabe
   ctx.font         = `${small ? 6 : 7}px "DejaVu Sans Mono"`;
   ctx.textAlign    = 'right';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText(`RBN S-Meter by W1VE · ${ageStr}`, x + W - 3, y + H - 2);
+  ctx.fillText(`hfsignals.live by W1VE · ${ageStr}`, x + W - 3, y + H - 2);
 }
 
 // ── Mode badges row — same colour scheme as the PWA ───────────────────────────
@@ -577,13 +577,13 @@ function renderWarmup(theme, size) {
   ctx.fillStyle = t.accent;
   ctx.font = `bold ${size === 'small' ? 8 : 10}px "DejaVu Sans Mono"`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('RBN S-METER', W/2, size === 'small' ? 7 : 10);
+  ctx.fillText('HFSIGNALS.LIVE', W/2, size === 'small' ? 7 : 10);
   ctx.fillStyle = t.textDim; ctx.font = '9px "DejaVu Sans Mono"';
   ctx.textBaseline = 'middle';
   ctx.fillText('Warming up... retry in ~30s', W/2, H/2 + 4);
   ctx.fillStyle = t.textDim; ctx.font = '6px "DejaVu Sans Mono"';
   ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
-  ctx.fillText('RBN S-Meter by W1VE', W-3, H-2);
+  ctx.fillText('hfsignals.live by W1VE', W-3, H-2);
   return canvas.toBuffer('image/png');
 }
 

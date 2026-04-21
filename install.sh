@@ -10,7 +10,7 @@ error() { echo -e "${RED}[error]${NC} $*"; exit 1; }
 
 echo ""
 echo -e "${CYN}╔══════════════════════════════════════════╗${NC}"
-echo -e "${CYN}║       RBN S-Meter  —  Installer          ║${NC}"
+echo -e "${CYN}║     hfsignals.live  —  Installer          ║${NC}"
 echo -e "${CYN}╚══════════════════════════════════════════╝${NC}"
 echo ""
 

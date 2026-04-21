@@ -1,4 +1,4 @@
-const CACHE = 'rbn-smeter-v10';
+const CACHE = 'hfsignals-live-v1';
 const ASSETS = [
   './',
   './index.html',
