@@ -52,6 +52,13 @@ let pskMeta = { age: null, cached: false, stale: false };
 
 const VANTAGE_GRID_COLOR = '#ffffff';
 const REGION_LAND_KEY = ['NA', 'NA', 'NA', 'SA', 'EU', 'AF', 'AS', 'OC'];
+const WORLD_GEOJSON_SOURCES = [
+  'https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson',
+  'https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json',
+];
+let detailedWorldPolygons = null;
+let detailedWorldLoadPromise = null;
+let detailedWorldLoadFailed = false;
 const WORLD_LANDMASSES = {
   NA: [
     [-168, 72], [-152, 62], [-135, 56], [-122, 50], [-108, 50], [-96, 46],
@@ -230,8 +237,61 @@ function drawPolygon(ctx, points, project, fillStyle, strokeStyle, lineWidth = 1
   }
 }
 
+function flattenGeoCoordinates(coords, out = []) {
+  if (!Array.isArray(coords) || coords.length === 0) return out;
+  if (Array.isArray(coords[0]) && typeof coords[0][0] === 'number') {
+    const ring = coords
+      .map(([lon, lat]) => [Number(lon), Number(lat)])
+      .filter(([lon, lat]) => Number.isFinite(lon) && Number.isFinite(lat));
+    if (ring.length >= 3) out.push(ring);
+    return out;
+  }
+  coords.forEach((child) => flattenGeoCoordinates(child, out));
+  return out;
+}
+
+function extractDetailedPolygons(geojson) {
+  const features = Array.isArray(geojson?.features) ? geojson.features : [];
+  const polygons = [];
+  features.forEach((feature) => {
+    const coords = feature?.geometry?.coordinates;
+    if (!coords) return;
+    flattenGeoCoordinates(coords, polygons);
+  });
+  return polygons.length > 0 ? polygons : null;
+}
+
+async function loadDetailedWorldPolygons() {
+  if (detailedWorldPolygons) return detailedWorldPolygons;
+  if (detailedWorldLoadPromise) return detailedWorldLoadPromise;
+  if (detailedWorldLoadFailed) return null;
+
+  detailedWorldLoadPromise = (async () => {
+    for (const url of WORLD_GEOJSON_SOURCES) {
+      try {
+        const resp = await fetch(url, { signal: AbortSignal.timeout(7000) });
+        if (!resp.ok) continue;
+        const data = await resp.json();
+        const polygons = extractDetailedPolygons(data);
+        if (polygons && polygons.length > 0) {
+          detailedWorldPolygons = polygons;
+          detailedWorldLoadFailed = false;
+          return detailedWorldPolygons;
+        }
+      } catch {}
+    }
+    detailedWorldLoadFailed = true;
+    return null;
+  })().finally(() => {
+    detailedWorldLoadPromise = null;
+  });
+
+  return detailedWorldLoadPromise;
+}
+
 function drawWorldLandmasses(ctx, project, fillAlpha = 0.24, strokeAlpha = 0.46) {
-  Object.values(WORLD_LANDMASSES).forEach((points) => {
+  const polygons = detailedWorldPolygons || Object.values(WORLD_LANDMASSES);
+  polygons.forEach((points) => {
     drawPolygon(
       ctx,
       points,
@@ -1407,6 +1467,13 @@ function updateVantageDisplay() {
   const v = currentVantageState();
   el.textContent = vantagePointText();
   if (canvas) {
+    const hasDetailed = Array.isArray(detailedWorldPolygons) && detailedWorldPolygons.length > 0;
+    canvas.classList.toggle('loading', !hasDetailed);
+    if (!hasDetailed && !detailedWorldLoadPromise && !detailedWorldLoadFailed) {
+      loadDetailedWorldPolygons().then(() => {
+        updateVantageDisplay();
+      }).catch(() => {});
+    }
     if (v.mode === 'grid') drawGridVantageMap(canvas, v.grid, v.radiusMiles, v.radiusLabel);
     else drawRegionVantageMap(canvas, v.regionIdx);
   }

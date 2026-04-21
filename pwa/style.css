@@ -388,6 +388,11 @@ h1 {
   background: rgba(13,13,26,0.45);
 }
 
+.vantage-map-canvas.loading {
+  opacity: 0.85;
+  filter: saturate(0.85);
+}
+
 .desktop-main {
   display: flex;
   align-items: stretch;
