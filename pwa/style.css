@@ -345,53 +345,105 @@ h1 {
 .btn-stop  { background: var(--accent2); color: #fff; border-color: var(--accent); }
 .btn-reset { background: #3a3a5e; color: var(--text); border-color: #555580; }
 
-/* ── Space-weather strip (inline, right of buttons) ─────────────── */
+/* ── Vantage point display (desktop centered text) ───────────────── */
+.vantage-display {
+  background: var(--bg2);
+  border-top: 1px solid rgba(0,212,170,0.15);
+  border-bottom: 1px solid rgba(0,212,170,0.25);
+  padding: 8px 12px 7px;
+  text-align: center;
+}
+
+.vantage-display-label {
+  font-family: 'Orbitron', monospace;
+  font-size: 18px;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+}
+
+.vantage-display-value {
+  margin-top: 2px;
+  font-family: 'Orbitron', monospace;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: #d9fff4;
+}
+
+.desktop-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 8px 0;
+}
+
+/* ── Space-weather strip (left vertical rail on desktop) ─────────── */
 #sw-bar {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  margin-left: 10px;
-  border-left: 1px solid rgba(0,212,170,0.25);
-  padding-left: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: 142px;
+  flex-shrink: 0;
+  border: 1px solid rgba(0,212,170,0.25);
+  border-radius: 4px;
+  background: rgba(13,13,26,0.35);
+  padding: 7px 6px;
 }
 
 .sw-item {
   display: flex;
-  align-items: center;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 4px;
 }
 
 .sw-lbl {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--accent);
   white-space: nowrap;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
 }
 
 .sw-val {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: bold;
   color: #fff;
   background: #1a7a3a;
-  padding: 2px 7px;
+  padding: 1px 6px;
   border-radius: 3px;
   white-space: nowrap;
-  min-width: 32px;
+  min-width: 46px;
   text-align: center;
   letter-spacing: 0.03em;
 }
 
 .sw-utc {
   font-family: 'Share Tech Mono', monospace;
-  letter-spacing: 0.08em;
-  min-width: 58px;
+  letter-spacing: 0.04em;
+  min-width: 72px;
 }
 
 @media (max-width: 599px) {
-  #sw-bar { margin-left: 0; border-left: none; padding-left: 0; gap: 5px 8px; }
+  .vantage-display { padding: 6px 10px; }
+  .vantage-display-label { font-size: 13px; }
+  .vantage-display-value { font-size: 14px; }
+  .desktop-main { display: block; padding: 0 10px; }
+  #sw-bar {
+    width: auto;
+    margin-left: 0;
+    border: none;
+    background: transparent;
+    padding: 4px 0 2px;
+    gap: 5px 8px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .sw-item { justify-content: flex-start; align-items: center; }
   .sw-lbl { font-size: 9px; }
   .sw-val { font-size: 9px; padding: 1px 4px; }
+  .sw-utc { min-width: 58px; }
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -401,16 +453,18 @@ h1 {
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
-  padding: 10px 8px 4px;
+  padding: 0 0 4px;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
+  flex: 1;
+  min-width: 0;
 }
 
 .meters-grid {
   display: flex;
   gap: 6px;
   min-width: max-content;
-  margin: 0 auto;
+  margin: 0;
 }
 
 /* ── Single region panel (desktop) ───────────────────────────────── */
@@ -470,7 +524,7 @@ h1 {
 }
 
 .region-panel.collapsed {
-  width: 98px;
+  width: 132px;
 }
 
 .desk-summary {
@@ -483,7 +537,7 @@ h1 {
 }
 
 .desk-pill {
-  font-size: 9px;
+  font-size: 10px;
   background: rgba(0,212,170,0.12);
   border: 1px solid rgba(0,212,170,0.3);
   border-radius: 3px;
@@ -509,8 +563,10 @@ h1 {
 .region-panel.collapsed .desk-pill {
   width: 100%;
   text-align: center;
-  padding: 1px 2px;
-  font-size: 8px;
+  padding: 2px 3px;
+  font-size: 12px;
+  white-space: normal;
+  line-height: 1.15;
 }
 
 .region-panel.collapsed .band-rows,

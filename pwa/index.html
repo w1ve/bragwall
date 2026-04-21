@@ -90,21 +90,29 @@
         <button id="btn-stop"  class="btn btn-stop"  disabled>■ Stop</button>
         <button id="btn-reset" class="btn btn-reset">↺ Reset</button>
       </div>
-      <div id="sw-bar">
-        <div class="sw-item"><span class="sw-lbl">SFI</span><span class="sw-val" id="sw-sfi">—</span></div>
-        <div class="sw-item"><span class="sw-lbl">SSN</span><span class="sw-val" id="sw-ssn">—</span></div>
-        <div class="sw-item"><span class="sw-lbl">A-Index</span><span class="sw-val" id="sw-a">—</span></div>
-        <div class="sw-item"><span class="sw-lbl">K-Index</span><span class="sw-val" id="sw-k">—</span></div>
-        <div class="sw-item"><span class="sw-lbl">Solar Wind</span><span class="sw-val" id="sw-wind">—</span></div>
-        <div class="sw-item"><span class="sw-lbl">Bz</span><span class="sw-val" id="sw-bz">—</span></div>
-        <div class="sw-item"><span class="sw-lbl">UTC</span><span class="sw-val sw-utc" id="sw-utc">00:00:00</span></div>
-      </div>
     </div>
   </div>
 
-  <div class="meters-scroll">
-    <div class="meters-grid" id="meters-grid">
-      <!-- Region panels injected by JS (desktop/tablet) -->
+  <div class="vantage-display">
+    <div class="vantage-display-label">Vantage Point:</div>
+    <div class="vantage-display-value" id="vantage-point-text">E. North America</div>
+  </div>
+
+  <div class="desktop-main">
+    <div id="sw-bar">
+      <div class="sw-item"><span class="sw-lbl">SFI</span><span class="sw-val" id="sw-sfi">—</span></div>
+      <div class="sw-item"><span class="sw-lbl">SSN</span><span class="sw-val" id="sw-ssn">—</span></div>
+      <div class="sw-item"><span class="sw-lbl">A-Index</span><span class="sw-val" id="sw-a">—</span></div>
+      <div class="sw-item"><span class="sw-lbl">K-Index</span><span class="sw-val" id="sw-k">—</span></div>
+      <div class="sw-item"><span class="sw-lbl">Solar Wind</span><span class="sw-val" id="sw-wind">—</span></div>
+      <div class="sw-item"><span class="sw-lbl">Bz</span><span class="sw-val" id="sw-bz">—</span></div>
+      <div class="sw-item"><span class="sw-lbl">UTC</span><span class="sw-val sw-utc" id="sw-utc">00:00:00</span></div>
+    </div>
+
+    <div class="meters-scroll">
+      <div class="meters-grid" id="meters-grid">
+        <!-- Region panels injected by JS (desktop/tablet) -->
+      </div>
     </div>
   </div>
 

@@ -1140,6 +1140,26 @@ function updateSkimmerCount(n, isGrid) {
   }
 }
 
+function vantagePointText() {
+  const mode = document.querySelector('input[name="vantage-mode"]:checked')?.value || 'region';
+  if (mode === 'grid') {
+    const grid = document.getElementById('grid-input').value.trim().toUpperCase();
+    const radiusSelect = document.getElementById('radius-select');
+    const radius = radiusSelect ? (RADIUS_VALUES[radiusSelect.selectedIndex] ?? 500) : 500;
+    const unit = getUnit();
+    const label = grid || '--';
+    return `${label} (${radius} ${unit})`;
+  }
+  const regionIdx = parseInt(document.getElementById('region-select').value, 10);
+  return REGIONS[regionIdx] || REGIONS[0];
+}
+
+function updateVantageDisplay() {
+  const el = document.getElementById('vantage-point-text');
+  if (!el) return;
+  el.textContent = vantagePointText();
+}
+
 // ── Auto-update grid from GPS ─────────────────────────────────────────────────
 function startAutoUpdate() {
   if (!('geolocation' in navigator)) {
@@ -1191,6 +1211,7 @@ function updateRadiusLabels() {
   RADIUS_VALUES.forEach((v, i) => { if (sel.options[i]) sel.options[i].text = `${v} ${u}`; });
   const btn = document.getElementById('unit-toggle');
   if (btn) { btn.textContent = u; btn.dataset.auto = (unitPref === 'auto') ? '1' : '0'; }
+  updateVantageDisplay();
 }
 
 function getRadiusMiles() {
@@ -1224,6 +1245,7 @@ function applySettings(s) {
   updateRadiusLabels();
   updateModeUI(s.mode);
   applyDesktopCollapseState();
+  updateVantageDisplay();
 }
 
 function updateModeUI(mode) {
@@ -1249,6 +1271,7 @@ function updateModeUI(mode) {
   if (rl) rl.classList.toggle('ctrl-label-disabled', !isGrid);
 
   if (!isGrid) stopAutoUpdate();
+  updateVantageDisplay();
 }
 
 // ── Geo auto-detect ───────────────────────────────────────────────────────────
@@ -1308,11 +1331,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('region-select').addEventListener('change', () => {
     if (unitPref === 'auto') updateRadiusLabels();
+    updateVantageDisplay();
     saveSettings();
     if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
   });
 
   document.getElementById('radius-select').addEventListener('change', () => {
+    updateVantageDisplay();
     saveSettings();
     if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
   });
@@ -1321,12 +1346,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const current = getUnit();
     unitPref = current === 'mi' ? 'km' : 'mi';
     updateRadiusLabels();
+    updateVantageDisplay();
     saveSettings();
     if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
   });
 
   const gi = document.getElementById('grid-input');
-  gi.addEventListener('input', () => { gi.style.borderColor = ''; saveSettings(); });
+  gi.addEventListener('input', () => {
+    gi.style.borderColor = '';
+    updateVantageDisplay();
+    saveSettings();
+  });
   gi.addEventListener('blur', () => {
     const g = gi.value.trim();
     if (g && !isValidGrid(g)) {
