@@ -7,10 +7,15 @@ const url   = require('url');
 const PORT = process.env.PORT || 3001;
 
 const SPOT_KEEP_MS  = 2 * 60 * 1000;
-const PSK_CACHE_MS  = 5 * 60 * 1000;
+const PSK_CACHE_MS  = parseInt(process.env.PSK_CACHE_MS || String(15 * 60 * 1000), 10);
 const PSK_URL_BASE  = 'https://retrieve.pskreporter.info/query';
-const PSK_FLOW_SEC  = parseInt(process.env.PSK_FLOW_SECONDS || '900', 10);
+const PSK_FLOW_SEC  = parseInt(process.env.PSK_FLOW_SECONDS || '1800', 10);
 const PSK_CONTACT   = process.env.PSK_APP_CONTACT || 'gerry@remote.radio';
+const PSK_MODES     = (process.env.PSK_MODES || 'FT8')
+  .split(',')
+  .map(s => s.trim().toUpperCase())
+  .filter(Boolean);
+const PSK_COOLDOWN_MS = parseInt(process.env.PSK_COOLDOWN_MS || String(30 * 60 * 1000), 10);
 
 const spotMap = new Map();
 const REGION_KEYS = ['ENA', 'CNA', 'WNA', 'SA', 'EU', 'AF', 'AS', 'OC'];
@@ -30,6 +35,8 @@ const BANDS = [
 let pskCacheData     = null;
 let pskCacheFetched  = 0;
 let pskFetchPromise  = null;
+let pskBlockedUntil  = 0;
+let pskLastError     = null;
 
 function pruneSpots() {
   const cutoff = Date.now() - SPOT_KEEP_MS;
@@ -288,15 +295,18 @@ async function fetchPskMode(mode) {
     'Connection': 'close',
   };
 
-  // First attempt: normal 15-minute window.
-  let raw = await fetchRaw(query, 25000, browserLikeHeaders);
-  let reports = parsePskReports(raw);
-  if (reports.length > 0) return reports;
-
-  // Second attempt: broaden to 30-minute window in case short window is sparse/empty.
-  const queryRetry = `${PSK_URL_BASE}?rronly=1&flowStartSeconds=-1800&nolocator=0&mode=${encodeURIComponent(mode)}&appcontact=${encodeURIComponent(PSK_CONTACT)}`;
-  raw = await fetchRaw(queryRetry, 30000, browserLikeHeaders);
-  reports = parsePskReports(raw);
+  const raw = await fetchRaw(query, 30000, browserLikeHeaders);
+  if (/too many queries|made too many queries/i.test(raw)) {
+    const e = new Error('psk_rate_limited');
+    e.code = 'PSK_RATE_LIMIT';
+    throw e;
+  }
+  if (/just a moment|attention required|cloudflare/i.test(raw) && !/<receptionReport\b/i.test(raw)) {
+    const e = new Error('psk_challenge');
+    e.code = 'PSK_RATE_LIMIT';
+    throw e;
+  }
+  const reports = parsePskReports(raw);
   return reports;
 }
 
@@ -311,16 +321,45 @@ async function servePsk(res) {
     }));
     return;
   }
+  if (now < pskBlockedUntil) {
+    const retryIn = Math.max(0, Math.round((pskBlockedUntil - now) / 1000));
+    if (pskCacheData) {
+      send(res, 200, 'application/json', JSON.stringify({
+        age: Math.round((now - pskCacheFetched) / 1000),
+        fetchedAt: new Date(pskCacheFetched).toISOString(),
+        byRegion: pskCacheData,
+        cached: true,
+        stale: true,
+        retryIn,
+        error: pskLastError || 'psk_throttled',
+      }));
+      return;
+    }
+    send(res, 429, 'application/json', JSON.stringify({
+      error: pskLastError || 'psk_throttled',
+      retryIn,
+    }));
+    return;
+  }
 
   if (!pskFetchPromise) {
     pskFetchPromise = (async () => {
-      const [ft8R, ft4R] = await Promise.allSettled([fetchPskMode('FT8'), fetchPskMode('FT4')]);
+      const modeFetches = await Promise.allSettled(PSK_MODES.map(fetchPskMode));
       const reports = [];
-      if (ft8R.status === 'fulfilled') reports.push(...ft8R.value);
-      if (ft4R.status === 'fulfilled') reports.push(...ft4R.value);
+      for (const mr of modeFetches) {
+        if (mr.status === 'fulfilled') reports.push(...mr.value);
+      }
+      const hardErrors = modeFetches
+        .filter(mr => mr.status === 'rejected')
+        .map(mr => mr.reason?.code || mr.reason?.message || 'psk_mode_error');
       if (reports.length === 0) throw new Error('no_psk_reports');
       pskCacheData = foldPskReports(reports);
       pskCacheFetched = Date.now();
+      pskLastError = null;
+      pskBlockedUntil = 0;
+      if (hardErrors.length > 0) {
+        console.warn('[psk] partial fetch errors:', hardErrors.join(','));
+      }
       return pskCacheData;
     })().finally(() => { pskFetchPromise = null; });
   }
@@ -344,7 +383,13 @@ async function servePsk(res) {
       }));
       return;
     }
-    send(res, 502, 'application/json', JSON.stringify({ error: 'PSK fetch error' }));
+    pskLastError = e?.code || e?.message || 'psk_fetch_error';
+    pskBlockedUntil = Date.now() + PSK_COOLDOWN_MS;
+    send(res, 502, 'application/json', JSON.stringify({
+      error: 'PSK fetch error',
+      reason: pskLastError,
+      retryIn: Math.round(PSK_COOLDOWN_MS / 1000),
+    }));
   }
 }
 
@@ -449,6 +494,8 @@ const server = http.createServer(async (req, res) => {
       feed: feedWs ? feedWs.readyState === 1 : false,
       spots: spotMap.size,
       pskAge: pskCacheFetched ? Math.round((Date.now() - pskCacheFetched) / 1000) : null,
+      pskRetryIn: pskBlockedUntil > Date.now() ? Math.round((pskBlockedUntil - Date.now()) / 1000) : 0,
+      pskModes: PSK_MODES,
     }));
     return;
   }
