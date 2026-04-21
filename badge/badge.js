@@ -213,7 +213,7 @@ function normMode(raw) {
 function fetchRbn() {
   const transport = RBN_URL.startsWith('https') ? https : http;
   return new Promise((resolve, reject) => {
-    const req = transport.request(RBN_URL, { headers: { 'User-Agent': 'RbnSMeter-Badge/1.0' }, timeout: 12000 }, res => {
+    const req = transport.request(RBN_URL, { headers: { 'User-Agent': 'hfsignals-badge/1.0' }, timeout: 12000 }, res => {
       const chunks = [];
       res.on('data', c => chunks.push(c));
       res.on('end', () => {
@@ -743,14 +743,14 @@ function sendPng(res, png, ageMs, warming) {
     'Content-Length':            png.length,
     'Cache-Control':             'public, max-age=60',
     'Access-Control-Allow-Origin': '*',
-    'X-RBN-Status':              warming ? 'warming' : 'live',
-    'X-RBN-Cache-Age':           Math.round(ageMs / 1000),
+    'X-HFSIGNALS-Status':        warming ? 'warming' : 'live',
+    'X-HFSIGNALS-Cache-Age':     Math.round(ageMs / 1000),
   });
   res.end(png);
 }
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`RBN Badge API listening on 0.0.0.0:${PORT}`);
+  console.log(`hfsignals badge API listening on 0.0.0.0:${PORT}`);
   // Pre-fetch data on startup
   getRbnData().then(() => console.log('Initial RBN data fetched.'));
 });
