@@ -6,6 +6,8 @@
  * Endpoints:
  *   GET /badge/region?from=NA&to=EU&band=20m&theme=dark|light&size=small|full
  *   GET /badge/grid?grid=FN42&radius=500&to=EU&band=20m&theme=dark|light&size=small|full
+ *   GET /hfsignals/region?from=NA&to=EU&band=20m&theme=dark|light&size=small|full
+ *   GET /hfsignals/grid?grid=FN42&radius=500&to=EU&band=20m&theme=dark|light&size=small|full
  *
  * Returns a PNG image suitable for embedding in web pages via <img> tags.
  *
@@ -611,9 +613,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (pathname !== '/badge/region' && pathname !== '/badge/grid') {
+  const isRegionPath = pathname === '/badge/region' || pathname === '/hfsignals/region';
+  const isGridPath   = pathname === '/badge/grid' || pathname === '/hfsignals/grid';
+  if (!isRegionPath && !isGridPath) {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
-    res.end('Not found. Use /badge/region or /badge/grid');
+    res.end('Not found. Use /badge/region, /badge/grid, /hfsignals/region, or /hfsignals/grid');
     return;
   }
 
@@ -632,7 +636,7 @@ const server = http.createServer(async (req, res) => {
 
   let fromKey, toKey, cacheKey;
 
-  if (pathname === '/badge/region') {
+  if (isRegionPath) {
     const fromRaw = (q.from || 'ENA').toUpperCase();
     const toRaw   = (q.to   || 'EU' ).toUpperCase();
     fromKey       = REGION_ALIASES[fromRaw];
@@ -683,13 +687,13 @@ const server = http.createServer(async (req, res) => {
 
   // ── All-bands path ─────────────────────────────────────────────────────────
   if (isAllBands) {
-    const fromLabel = pathname === '/badge/region'
+    const fromLabel = isRegionPath
       ? (REGIONS.find(r => r.key === fromKey)?.label || fromKey)
       : `Grid ${q.grid?.toUpperCase()}`;
     const toLabel = REGIONS.find(r => r.key === toKey)?.label || toKey;
 
     const allResults = BANDS.map(b => {
-      if (pathname === '/badge/region') {
+      if (isRegionPath) {
         return computeRegionBand(data, fromKey, toKey, b.label);
       } else {
         const grid   = (q.grid || '').toUpperCase();
@@ -706,7 +710,7 @@ const server = http.createServer(async (req, res) => {
 
   // ── Single-band path ───────────────────────────────────────────────────────
   let result;
-  if (pathname === '/badge/region') {
+  if (isRegionPath) {
     result = computeRegionBand(data, fromKey, toKey, band);
   } else {
     const grid   = (q.grid || '').toUpperCase();
@@ -715,7 +719,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Get display labels
-  const fromLabel = pathname === '/badge/region'
+  const fromLabel = isRegionPath
     ? (REGIONS.find(r => r.key === fromKey)?.label || fromKey)
     : `Grid ${q.grid?.toUpperCase()}`;
   const toLabel = REGIONS.find(r => r.key === toKey)?.label || toKey;
