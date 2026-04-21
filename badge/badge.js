@@ -56,8 +56,11 @@ const BANDS = [
   { label: '160m', min: 1800,  max: 2000  },
   { label: '80m',  min: 3500,  max: 4000  },
   { label: '40m',  min: 7000,  max: 7300  },
+  { label: '30m',  min: 10100, max: 10150 },
   { label: '20m',  min: 14000, max: 14350 },
+  { label: '17m',  min: 18068, max: 18168 },
   { label: '15m',  min: 21000, max: 21450 },
+  { label: '12m',  min: 24890, max: 24990 },
   { label: '10m',  min: 28000, max: 29700 },
   { label: '6m',   min: 50000, max: 54000 },
 ];

@@ -11,6 +11,7 @@ const REGIONS = [
   'Asia',
   'Oceania',
 ];
+const REGION_KEYS = ['ENA', 'CNA', 'WNA', 'SA', 'EU', 'AF', 'AS', 'OC'];
 
 const BANDS = [
   { label: '160m', min: 1800,  max: 2000  },
@@ -34,6 +35,10 @@ const SSB_SNR_THRESHOLD = 20.0;  // min median SNR (dB) for SSB to be considered
 const KNOWN_MODES = ['CW', 'RTTY', 'FT8', 'FT4'];
 
 const PROXY_BASE = '';   // empty = same origin as the PWA
+const REGION_INDEX_BY_KEY = REGION_KEYS.reduce((acc, key, idx) => {
+  acc[key] = idx;
+  return acc;
+}, {});
 
 const SEG_COLORS = {
   live: ['#00d250','#00d250','#00d250','#00d250','#00d250','#00d250','#00d250','#00d250','#00d250',
@@ -41,6 +46,9 @@ const SEG_COLORS = {
   peak: ['#005a22','#005a22','#005a22','#005a22','#005a22','#005a22','#005a22','#005a22','#005a22',
          '#645500','#645500','#645500','#723c00','#641212','#641212'],
 };
+
+let pskByRegion = {};
+let pskMeta = { age: null, cached: false, stale: false };
 
 // ── Mode normalisation ────────────────────────────────────────────────────────
 function normaliseMode(raw) {
@@ -127,6 +135,64 @@ function snrToSUnit(snr) {
   return 'S9+30';
 }
 
+function median(nums) {
+  if (!nums || nums.length === 0) return null;
+  const sorted = nums.slice().sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function qualityColorForSnr(snr) {
+  if (snr == null) return null;
+  const frac = Math.max(0, Math.min(snr / MAX_SNR, 1));
+  if (frac < 0.60) return '#00d250';
+  if (frac < 0.80) return '#e6c800';
+  if (frac < 0.90) return '#ff8c00';
+  return '#dc1e1e';
+}
+
+function regionKeyForIndex(idx) {
+  return REGION_KEYS[idx] || REGION_KEYS[0];
+}
+
+function createModeSampleCube() {
+  return Array.from({ length: REGIONS.length }, () =>
+    Array.from({ length: BANDS.length }, () => ({ CW: [], RTTY: [], FT8: [], FT4: [] }))
+  );
+}
+
+function createModeQualityCube() {
+  return Array.from({ length: REGIONS.length }, () =>
+    Array.from({ length: BANDS.length }, () => ({
+      CW: null, RTTY: null, FT8: null, FT4: null, FTx: null, SSB: null,
+    }))
+  );
+}
+
+function addModeSample(modeCube, regionIdx, bandIdx, rawMode, snr) {
+  const nm = normaliseMode(rawMode);
+  if (!KNOWN_MODES.includes(nm)) return;
+  modeCube[regionIdx][bandIdx][nm].push(snr);
+}
+
+function collapseModeSamples(modeCube, meterState) {
+  const out = createModeQualityCube();
+  for (let ri = 0; ri < REGIONS.length; ri++) {
+    for (let bi = 0; bi < BANDS.length; bi++) {
+      const bucket = modeCube[ri][bi];
+      const ftAll = bucket.FT8.concat(bucket.FT4);
+      out[ri][bi].CW = median(bucket.CW);
+      out[ri][bi].RTTY = median(bucket.RTTY);
+      out[ri][bi].FT8 = median(bucket.FT8);
+      out[ri][bi].FT4 = median(bucket.FT4);
+      out[ri][bi].FTx = median(ftAll);
+      out[ri][bi].SSB = (meterState[ri].hasValue[bi] && meterState[ri].ema[bi] >= SSB_SNR_THRESHOLD)
+        ? Math.round(meterState[ri].ema[bi] * 10) / 10
+        : null;
+    }
+  }
+  return out;
+}
+
 // ── Region classifier ─────────────────────────────────────────────────────────
 const PREFIX_TABLE = [
   ['W1',0],['W2',0],['W3',0],['W4',0],['W8',0],['W9',0],
@@ -198,6 +264,10 @@ function regionFromLatLon(lat, lon) {
   if (lat >= -10 && lat <= 75 && lon >= 45)                return 6;
   if (lat <= 0   && lon >= 100)                            return 7;
   return 0;
+}
+
+function regionKeyFromLatLon(lat, lon) {
+  return regionKeyForIndex(regionFromLatLon(lat, lon));
 }
 
 // ── Spotter cache ─────────────────────────────────────────────────────────────
@@ -403,8 +473,6 @@ function drawBar(canvas, hasData, snr, peak) {
 
 // ── Mode row builder ──────────────────────────────────────────────────────────
 // Abbreviated labels to fit narrow panel columns
-const MODE_ABBREV = { CW: 'CW', RTTY: 'RY', FT8: 'FTx', FT4: 'FTx', SSB: 'SSB' };
-
 // Display slots: CW, RY (RTTY), FTx (FT8+FT4), SSB
 const DISPLAY_MODES = [
   { abbr: 'CW',  sources: ['CW'],        isSSB: false },
@@ -413,27 +481,40 @@ const DISPLAY_MODES = [
   { abbr: 'SSB', sources: ['SSB'],       isSSB: true  },
 ];
 
-function buildModeRow(el, hasData, activeModes) {
+function buildModeRow(el, hasData, activeModes, modeSnr = {}) {
   el.innerHTML = '';
   DISPLAY_MODES.forEach(({ abbr, sources, isSSB }) => {
     const span   = document.createElement('span');
     const active = sources.some(s => activeModes.has(s));
+    const txt = document.createElement('span');
+    txt.className = 'mode-label-text';
+    const qBar = document.createElement('span');
+    qBar.className = 'mode-quality-bar';
+    const qSnr = modeSnr[abbr] ?? null;
+    const qColor = qualityColorForSnr(qSnr);
     if (!hasData) {
       span.className   = 'mode-label mode-dim';
-      span.textContent = abbr;
+      txt.textContent = abbr;
+      qBar.style.background = 'transparent';
     } else if (active && isSSB) {
       span.className   = 'mode-label mode-ssb';
-      span.textContent = '\u2713' + abbr;
+      txt.textContent = '\u2713' + abbr;
+      qBar.style.background = qColor || 'transparent';
     } else if (active) {
       span.className   = 'mode-label mode-active';
-      span.textContent = '\u2713' + abbr;
+      txt.textContent = '\u2713' + abbr;
+      qBar.style.background = qColor || 'transparent';
     } else if (isSSB) {
       span.className   = 'mode-label mode-dim';
-      span.textContent = abbr;
+      txt.textContent = abbr;
+      qBar.style.background = 'transparent';
     } else {
       span.className   = 'mode-label mode-absent';
-      span.textContent = '\u2717' + abbr;
+      txt.textContent = '\u2717' + abbr;
+      qBar.style.background = 'transparent';
     }
+    span.appendChild(qBar);
+    span.appendChild(txt);
     el.appendChild(span);
   });
 }
@@ -649,7 +730,7 @@ function buildPanels() {
 }
 
 // ── Refresh both layouts ──────────────────────────────────────────────────────
-function refreshUI() {
+function refreshUI(modeQualityByBand = null) {
   meters.forEach((m, ri) => {
     BANDS.forEach((_, bi) => {
       const hasData = m.hasValue[bi];
@@ -692,8 +773,9 @@ function refreshUI() {
       // Per-band mode rows
       const bModes   = m.activeModes(bi);
       const bHasData = m.hasValue[bi];
-      if (deskModeRows[ri]?.[bi]) buildModeRow(deskModeRows[ri][bi], bHasData, bModes);
-      if (accModeRows[ri]?.[bi])  buildModeRow(accModeRows[ri][bi],  bHasData, bModes);
+      const q = modeQualityByBand?.[ri]?.[bi] || {};
+      if (deskModeRows[ri]?.[bi]) buildModeRow(deskModeRows[ri][bi], bHasData, bModes, q);
+      if (accModeRows[ri]?.[bi])  buildModeRow(accModeRows[ri][bi],  bHasData, bModes, q);
     });
 
     const txt = m.hasAnyData ? `${m.totalSpots} spots` : 'no data';
@@ -711,6 +793,22 @@ let skimmerCount = 0;
 function bandForFreq(khz) {
   const i = BANDS.findIndex(b => khz >= b.min && khz <= b.max);
   return i >= 0 ? i : -1;
+}
+
+async function fetchPsk() {
+  try {
+    const resp = await fetch(PROXY_BASE + '/psk', { signal: AbortSignal.timeout(25000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    pskByRegion = data?.byRegion && typeof data.byRegion === 'object' ? data.byRegion : {};
+    pskMeta = {
+      age: typeof data?.age === 'number' ? data.age : null,
+      cached: !!data?.cached,
+      stale: !!data?.stale,
+    };
+  } catch {
+    // Keep previous PSK snapshot on transient failures.
+  }
 }
 
 async function pollOnce() {
@@ -743,6 +841,7 @@ async function pollOnce() {
   const pendingGrid = [];
   const sampled = Array.from({length: REGIONS.length}, () => new Uint8Array(BANDS.length));
   const regionSkimmers = new Set();
+  const modeSamples = createModeSampleCube();
 
   for (const [spotCall, spot] of Object.entries(data)) {
     if (!spot.lsn || typeof spot.lsn !== 'object') continue;
@@ -766,6 +865,7 @@ async function pollOnce() {
         spotsFromVantage++;
         if (dxRegion < 0) { spotsUnknown++; continue; }
         meters[dxRegion].addSample(bi, snr, spot.mode || '');
+        addModeSample(modeSamples, dxRegion, bi, spot.mode || '', snr);
         sampled[dxRegion][bi] = 1;
         spotsProcessed++;
       } else {
@@ -787,6 +887,7 @@ async function pollOnce() {
       spotsFromVantage++;
       if (dxRegion < 0) { spotsUnknown++; continue; }
       meters[dxRegion].addSample(bi, snr, spotMode);
+      addModeSample(modeSamples, dxRegion, bi, spotMode, snr);
       sampled[dxRegion][bi] = 1;
       spotsProcessed++;
     }
@@ -806,16 +907,38 @@ async function pollOnce() {
     updateSkimmerCount(skimmerCount, false);
   }
 
+  // Fetch PSKReporter aggregate in parallel with final UI composition.
+  await fetchPsk();
+
   // Decay bands that received no samples
   for (let ri = 0; ri < REGIONS.length; ri++)
     for (let bi = 0; bi < BANDS.length; bi++)
       if (!sampled[ri][bi]) meters[ri].decayBand(bi);
 
-  refreshUI();
+  const modeQualityByBand = collapseModeSamples(modeSamples, meters);
+
+  // Overlay FTx quality from PSKReporter by from/to region + band.
+  const fromKey = mode === 'region'
+    ? regionKeyForIndex(vantageRegion)
+    : (gridLL ? regionKeyForIndex(regionFromLatLon(gridLL.lat, gridLL.lon)) : null);
+  if (fromKey && pskByRegion[fromKey]) {
+    for (let ri = 0; ri < REGIONS.length; ri++) {
+      const toKey = regionKeyForIndex(ri);
+      for (let bi = 0; bi < BANDS.length; bi++) {
+        const pskEntry = pskByRegion[fromKey]?.[toKey]?.[BANDS[bi].label];
+        if (pskEntry && typeof pskEntry.snr === 'number') {
+          modeQualityByBand[ri][bi].FTx = pskEntry.snr;
+        }
+      }
+    }
+  }
+
+  refreshUI(modeQualityByBand);
 
   const ts = new Date().toLocaleTimeString();
+  const pskInfo = pskMeta.age == null ? 'psk=na' : `psk=${pskMeta.age}s${pskMeta.stale ? ' stale' : ''}`;
   setStatus(
-    `Poll ${ts}  |  spots=${totalSpots}  vantage=${spotsFromVantage}  mapped=${spotsProcessed}  unk=${spotsUnknown}`,
+    `Poll ${ts}  |  spots=${totalSpots}  vantage=${spotsFromVantage}  mapped=${spotsProcessed}  unk=${spotsUnknown}  ${pskInfo}`,
     spotsProcessed > 0 ? 'ok' : 'warn'
   );
 }

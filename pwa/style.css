@@ -230,7 +230,27 @@ h1 {
   height: 11px;
   border-radius: 2px;
   padding: 0 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.mode-label-text {
   display: block;
+  width: 100%;
+  text-align: center;
+  line-height: 9px;
+}
+
+.mode-quality-bar {
+  display: block;
+  width: calc(100% - 2px);
+  height: 2px;
+  border-radius: 1px;
+  background: transparent;
+  opacity: 0.95;
 }
 
 /* Active — white text on bright green badge */
