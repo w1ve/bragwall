@@ -51,11 +51,21 @@ let pskByRegion = {};
 let pskMeta = { age: null, cached: false, stale: false };
 
 const VANTAGE_GRID_COLOR = '#ffffff';
-const SOURCE_REGION_NAMES = [...REGIONS, 'Caribbean'];
-const SOURCE_REGION_KEYS = [...REGION_KEYS, 'CAR'];
-const CARIBBEAN_REGION_INDEX = 8;
+const SOURCE_REGION_NAMES = [
+  'E. North America',
+  'C. North America',
+  'W. North America',
+  'Caribbean',
+  'South America',
+  'Europe',
+  'Africa',
+  'Asia',
+  'Oceania',
+];
+const SOURCE_REGION_KEYS = ['ENA', 'CNA', 'WNA', 'CAR', 'SA', 'EU', 'AF', 'AS', 'OC'];
+const CARIBBEAN_REGION_INDEX = 3;
 const CARIBBEAN_CENTER = { lat: 17.0, lon: -72.0, radiusMiles: 950 };
-const REGION_LAND_KEY = ['NA', 'NA', 'NA', 'SA', 'EU', 'AF', 'AS', 'OC', 'CAR'];
+const REGION_LAND_KEY = ['NA', 'NA', 'NA', 'CAR', 'SA', 'EU', 'AF', 'AS', 'OC'];
 const WORLD_GEOJSON_SOURCES = [
   'https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson',
   'https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json',
@@ -402,9 +412,9 @@ function drawHighlightedRegion(ctx, project, regionKey, regionIdx, w, h) {
   const highlightFill = 'rgba(0, 210, 80, 0.78)';
   const highlightStroke = 'rgba(0, 169, 107, 0.95)';
   const naLonSplitByRegion = {
-    2: [-130, -108], // W. North America
-    1: [-108, -92],  // C. North America
-    0: [-92, -66],   // E. North America
+    2: [-130, -103], // W. North America (unchanged right edge relative to prior split)
+    1: [-103, -85],  // C. North America (~300 miles wider)
+    0: [-85, -52],   // E. North America (left edge moved east ~500 miles, extends to coast/ocean)
   };
 
   if (regionPolys && regionPolys.length > 0) {
@@ -677,6 +687,13 @@ function classifyCallsign(call) {
     }
   }
   return -1;
+}
+
+function isCaribbeanSourceCallsign(call) {
+  const u = String(call || '').toUpperCase();
+  if (!u) return false;
+  const base = u.includes('/') ? u.split('/')[0] : u;
+  return CARIBBEAN_SOURCE_PREFIXES.some((pfx) => base.startsWith(pfx));
 }
 
 function regionFromLatLon(lat, lon) {
@@ -1409,7 +1426,9 @@ async function pollOnce() {
       if (isNaN(snr)) continue;
 
       if (mode === 'region') {
-        const spotterRegion = classifyCallsign(listenerCall);
+        let spotterRegion = classifyCallsign(listenerCall);
+        if (spotterRegion === 0 && isCaribbeanSourceCallsign(listenerCall))
+          spotterRegion = CARIBBEAN_REGION_INDEX;
         if (spotterRegion !== vantageRegion) continue;
         regionSkimmers.add(listenerCall.toUpperCase().split('/')[0]);
         spotsFromVantage++;
@@ -1574,7 +1593,7 @@ function vantagePointText() {
     const label = v.grid || '--';
     return `${label} (${v.radius} ${v.unit})`;
   }
-  return REGIONS[v.regionIdx] || REGIONS[0];
+  return SOURCE_REGION_NAMES[v.regionIdx] || SOURCE_REGION_NAMES[0];
 }
 
 function updateVantageDisplay() {
