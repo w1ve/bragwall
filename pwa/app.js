@@ -64,7 +64,15 @@ function normaliseMode(raw) {
 // ── Settings persistence ──────────────────────────────────────────────────────
 const Settings = {
   KEY: 'rbn_smeter_settings',
-  defaults: { mode: 'region', regionIndex: 0, grid: '', radiusIndex: 2, unit: 'auto', autoUpdate: false },
+  defaults: {
+    mode: 'region',
+    regionIndex: 0,
+    grid: '',
+    radiusIndex: 2,
+    unit: 'auto',
+    autoUpdate: false,
+    desktopCollapsed: [],
+  },
   load() {
     try { return { ...this.defaults, ...JSON.parse(localStorage.getItem(this.KEY) || '{}') }; }
     catch { return { ...this.defaults }; }
@@ -574,6 +582,9 @@ const canvases     = []; // [regionIdx][bandIdx]
 const sUnits       = []; // [regionIdx][bandIdx]
 const footers      = []; // [regionIdx]
 const deskModeRows = []; // [regionIdx][bandIdx]
+const deskPanels   = []; // [regionIdx]
+const deskHeaders  = []; // [regionIdx]
+const deskPills    = []; // [regionIdx][bandIdx]
 
 // Phone refs
 const accCanvases = []; // [regionIdx][bandIdx]
@@ -582,20 +593,86 @@ const accFooters  = []; // [regionIdx]
 const accPills    = []; // [regionIdx][bandIdx]
 const accModeRows = []; // [regionIdx][bandIdx]
 
+let desktopCollapsed = Array.from({ length: REGIONS.length }, () => false);
+
+function normaliseDesktopCollapsed(raw) {
+  const out = Array.from({ length: REGIONS.length }, () => false);
+  if (!Array.isArray(raw)) return out;
+  raw.forEach((idx) => {
+    const i = Number(idx);
+    if (Number.isInteger(i) && i >= 0 && i < REGIONS.length) out[i] = true;
+  });
+  return out;
+}
+
+function collapsedDesktopIndexes() {
+  const out = [];
+  desktopCollapsed.forEach((v, idx) => { if (v) out.push(idx); });
+  return out;
+}
+
+function setDesktopPanelCollapsed(regionIdx, collapsed, shouldSave = true) {
+  desktopCollapsed[regionIdx] = !!collapsed;
+  const panel = deskPanels[regionIdx];
+  const hdr = deskHeaders[regionIdx];
+  if (panel) panel.classList.toggle('collapsed', desktopCollapsed[regionIdx]);
+  if (hdr) hdr.setAttribute('aria-expanded', String(!desktopCollapsed[regionIdx]));
+  if (shouldSave) saveSettings();
+}
+
+function applyDesktopCollapseState() {
+  for (let ri = 0; ri < REGIONS.length; ri++) {
+    setDesktopPanelCollapsed(ri, desktopCollapsed[ri], false);
+  }
+}
+
+function updateSummaryPill(pill, bandIdx, hasData, snr, className) {
+  if (!pill) return;
+  if (hasData) {
+    pill.textContent = `${BANDS[bandIdx].label} ${snrToSUnit(snr)}`;
+    pill.className = className;
+  } else {
+    pill.textContent = BANDS[bandIdx].label;
+    pill.className = `${className} no-data`;
+  }
+}
+
 // ── Build desktop panels ──────────────────────────────────────────────────────
 function buildDesktopPanels() {
   const grid = document.getElementById('meters-grid');
   grid.innerHTML = '';
   canvases.length = 0; sUnits.length = 0; footers.length = 0; deskModeRows.length = 0;
+  deskPanels.length = 0; deskHeaders.length = 0; deskPills.length = 0;
 
   REGIONS.forEach((name, ri) => {
     const panel = document.createElement('div');
     panel.className = 'region-panel';
 
     const hdr = document.createElement('div');
-    hdr.className   = 'region-header';
-    hdr.textContent = name;
+    hdr.className = 'region-header';
+    hdr.setAttribute('role', 'button');
+    hdr.setAttribute('tabindex', '0');
+    const hdrName = document.createElement('span');
+    hdrName.className = 'region-header-name';
+    hdrName.textContent = name;
+    const hdrChevron = document.createElement('span');
+    hdrChevron.className = 'region-header-chevron';
+    hdrChevron.textContent = '▼';
+    hdr.appendChild(hdrName);
+    hdr.appendChild(hdrChevron);
     panel.appendChild(hdr);
+
+    const summary = document.createElement('div');
+    summary.className = 'desk-summary';
+    const rp = [];
+    BANDS.forEach((band) => {
+      const pill = document.createElement('span');
+      pill.className = 'desk-pill no-data';
+      pill.textContent = band.label;
+      summary.appendChild(pill);
+      rp.push(pill);
+    });
+    panel.appendChild(summary);
 
     const rows = document.createElement('div');
     rows.className = 'band-rows';
@@ -646,6 +723,19 @@ function buildDesktopPanels() {
     sUnits.push(rs);
     footers.push(ftr);
     deskModeRows.push(rmDesk);
+    deskPanels.push(panel);
+    deskHeaders.push(hdr);
+    deskPills.push(rp);
+
+    const toggleCollapse = () => setDesktopPanelCollapsed(ri, !desktopCollapsed[ri]);
+    hdr.addEventListener('click', toggleCollapse);
+    hdr.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleCollapse();
+      }
+    });
+    setDesktopPanelCollapsed(ri, desktopCollapsed[ri], false);
   });
 
   requestAnimationFrame(() => {
@@ -806,12 +896,16 @@ function refreshUI(modeQualityByBand = null) {
 
         const pill = accPills[ri][bi];
         if (hasData) {
-          pill.textContent = `${BANDS[bi].label} ${snrToSUnit(snr)}`;
-          pill.className   = 'acc-pill';
+          updateSummaryPill(pill, bi, true, snr, 'acc-pill');
         } else {
-          pill.textContent = BANDS[bi].label;
-          pill.className   = 'acc-pill no-data';
+          updateSummaryPill(pill, bi, false, snr, 'acc-pill');
         }
+      }
+
+      // Desktop collapsed summary pills
+      if (deskPills[ri]) {
+        const dp = deskPills[ri][bi];
+        updateSummaryPill(dp, bi, hasData, snr, 'desk-pill');
       }
 
       // Per-band mode rows
@@ -1114,10 +1208,12 @@ function saveSettings() {
     radiusIndex:  document.getElementById('radius-select').selectedIndex,
     unit:         unitPref,
     autoUpdate:   document.getElementById('autoupdate-cb')?.checked || false,
+    desktopCollapsed: collapsedDesktopIndexes(),
   });
 }
 
 function applySettings(s) {
+  desktopCollapsed = normaliseDesktopCollapsed(s.desktopCollapsed);
   document.querySelector(`input[name="vantage-mode"][value="${s.mode}"]`).checked = true;
   document.getElementById('region-select').value = s.regionIndex;
   document.getElementById('grid-input').value    = s.grid || '';
@@ -1127,6 +1223,7 @@ function applySettings(s) {
     document.getElementById('autoupdate-cb').checked = s.autoUpdate || false;
   updateRadiusLabels();
   updateModeUI(s.mode);
+  applyDesktopCollapseState();
 }
 
 function updateModeUI(mode) {
