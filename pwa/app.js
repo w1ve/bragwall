@@ -729,6 +729,13 @@ function targetRegionKeyForIndex(idx) {
   return REGION_KEYS[idx];
 }
 
+function sourceRegionKeyForCallsign(call) {
+  const regionIdx = classifyCallsign(call);
+  if (regionIdx < 0) return null;
+  if (regionIdx === 0 && isCaribbeanSourceCallsign(call)) return 'CAR';
+  return REGION_KEYS[regionIdx] || null;
+}
+
 function createModeSampleCube() {
   return Array.from({ length: REGIONS.length }, () =>
     Array.from({ length: BANDS.length }, () => ({ CW: [], RTTY: [], FT8: [], FT4: [] }))
@@ -1533,6 +1540,7 @@ async function pollOnce() {
   }
 
   const vantageRegion = parseInt(document.getElementById('region-select').value);
+  const rbnVantageRegionKey = sourceRegionKeyForIndex(vantageRegion);
   const vantageGrid   = document.getElementById('grid-input').value.trim().toUpperCase();
   const radiusMiles   = getRadiusMiles();
 
@@ -1566,10 +1574,9 @@ async function pollOnce() {
       if (isNaN(snr)) continue;
 
       if (mode === 'region') {
-        let spotterRegion = classifyCallsign(listenerCall);
-        if (spotterRegion === 0 && isCaribbeanSourceCallsign(listenerCall))
-          spotterRegion = CARIBBEAN_REGION_INDEX;
-        if (spotterRegion !== vantageRegion) continue;
+        if (!rbnVantageRegionKey) continue;
+        const spotterRegionKey = sourceRegionKeyForCallsign(listenerCall);
+        if (spotterRegionKey !== rbnVantageRegionKey) continue;
         regionSkimmers.add(listenerCall.toUpperCase().split('/')[0]);
         spotsFromVantage++;
         if (dxRegion < 0) { spotsUnknown++; continue; }
