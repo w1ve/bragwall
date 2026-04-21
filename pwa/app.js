@@ -480,6 +480,7 @@ const DISPLAY_MODES = [
   { abbr: 'FTx', sources: ['FT8','FT4'], isSSB: false },
   { abbr: 'SSB', sources: ['SSB'],       isSSB: true  },
 ];
+const MODE_QUALITY_KEY = { CW: 'CW', RY: 'RTTY', FTx: 'FTx', SSB: 'SSB' };
 
 function buildModeRow(el, hasData, activeModes, modeSnr = {}) {
   el.innerHTML = '';
@@ -490,7 +491,7 @@ function buildModeRow(el, hasData, activeModes, modeSnr = {}) {
     txt.className = 'mode-label-text';
     const qBar = document.createElement('span');
     qBar.className = 'mode-quality-bar';
-    const qSnr = modeSnr[abbr] ?? null;
+    const qSnr = modeSnr[MODE_QUALITY_KEY[abbr]] ?? null;
     const qColor = qualityColorForSnr(qSnr);
     if (!hasData) {
       span.className   = 'mode-label mode-dim';
@@ -500,18 +501,22 @@ function buildModeRow(el, hasData, activeModes, modeSnr = {}) {
       span.className   = 'mode-label mode-ssb';
       txt.textContent = '\u2713' + abbr;
       qBar.style.background = qColor || 'transparent';
+      qBar.style.opacity = qColor ? '1' : '0';
     } else if (active) {
       span.className   = 'mode-label mode-active';
       txt.textContent = '\u2713' + abbr;
       qBar.style.background = qColor || 'transparent';
+      qBar.style.opacity = qColor ? '1' : '0';
     } else if (isSSB) {
       span.className   = 'mode-label mode-dim';
       txt.textContent = abbr;
       qBar.style.background = 'transparent';
+      qBar.style.opacity = '0';
     } else {
       span.className   = 'mode-label mode-absent';
       txt.textContent = '\u2717' + abbr;
       qBar.style.background = 'transparent';
+      qBar.style.opacity = '0';
     }
     span.appendChild(qBar);
     span.appendChild(txt);
