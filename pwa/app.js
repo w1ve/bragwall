@@ -1641,8 +1641,8 @@ async function pollOnce() {
           if (typeof pskEntry.count === 'number' && pskEntry.count > 0)
             ftxReportsInQuery += pskEntry.count;
           // For the Vantage FTx tooltip we want reporting receiver stations
-          // (same conceptual side as "skimmers"), not DX senders.
-          const reporterCalls = Array.isArray(pskEntry.rxCalls) ? pskEntry.rxCalls : pskEntry.txCalls;
+          // (same conceptual side as "skimmers"), never DX sender fallbacks.
+          const reporterCalls = Array.isArray(pskEntry.rxCalls) ? pskEntry.rxCalls : [];
           if (Array.isArray(reporterCalls)) {
             reporterCalls.forEach((c) => {
               const s = String(c || '').trim().toUpperCase();

@@ -330,9 +330,18 @@ function callsignCandidates(call) {
   if (!raw) return [];
   const parts = raw.split('/').map((s) => s.replace(/[^A-Z0-9]/g, '')).filter(Boolean);
   if (parts.length === 0) return [];
+  const preferred = [];
+  const appended = [];
+  for (const p of parts) {
+    // Portable markers should not drive region selection.
+    if (p === 'P' || p === 'QRP' || p === 'QRP/P' || p === 'M' || p === 'MM' || p === 'AM') continue;
+    // Prefer likely base calls over one-letter or numeric add-ons.
+    if (/[A-Z]/.test(p) && /\d/.test(p) && p.length >= 3) preferred.push(p);
+    else appended.push(p);
+  }
   const seen = new Set();
   const ordered = [];
-  for (const p of parts) {
+  for (const p of preferred.concat(appended)) {
     if (!seen.has(p)) {
       seen.add(p);
       ordered.push(p);
