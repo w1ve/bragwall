@@ -120,12 +120,12 @@ function send(res, status, contentType, body) {
   res.end(body);
 }
 
-function fetchRaw(targetUrl, timeoutMs = 8000) {
+function fetchRaw(targetUrl, timeoutMs = 8000, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
     const parsed = url.parse(targetUrl);
     const req = https.request(
       { hostname: parsed.hostname, path: parsed.path, method: 'GET',
-        headers: { 'User-Agent': 'RbnSMeter-Proxy/1.0' }, timeout: timeoutMs },
+        headers: { 'User-Agent': 'RbnSMeter-Proxy/1.0', ...extraHeaders }, timeout: timeoutMs },
       upstream => {
         const chunks = [];
         upstream.on('data', c => chunks.push(c));
@@ -281,8 +281,23 @@ function foldPskReports(reports) {
 
 async function fetchPskMode(mode) {
   const query = `${PSK_URL_BASE}?rronly=1&flowStartSeconds=-${PSK_FLOW_SEC}&nolocator=0&mode=${encodeURIComponent(mode)}&appcontact=${encodeURIComponent(PSK_CONTACT)}`;
-  const raw = await fetchRaw(query, 25000);
-  return parsePskReports(raw);
+  const browserLikeHeaders = {
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'application/xml,text/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Connection': 'close',
+  };
+
+  // First attempt: normal 15-minute window.
+  let raw = await fetchRaw(query, 25000, browserLikeHeaders);
+  let reports = parsePskReports(raw);
+  if (reports.length > 0) return reports;
+
+  // Second attempt: broaden to 30-minute window in case short window is sparse/empty.
+  const queryRetry = `${PSK_URL_BASE}?rronly=1&flowStartSeconds=-1800&nolocator=0&mode=${encodeURIComponent(mode)}&appcontact=${encodeURIComponent(PSK_CONTACT)}`;
+  raw = await fetchRaw(queryRetry, 30000, browserLikeHeaders);
+  reports = parsePskReports(raw);
+  return reports;
 }
 
 async function servePsk(res) {
