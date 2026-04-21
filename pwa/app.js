@@ -485,12 +485,12 @@ function drawBar(canvas, hasData, snr, peak) {
 
 // ── Mode row builder ──────────────────────────────────────────────────────────
 // Abbreviated labels to fit narrow panel columns
-// Display slots: CW, RY (RTTY), FTx (FT8+FT4), SSB
+// Display slots: CW, SSB, RY (RTTY), FTx (FT8+FT4)
 const DISPLAY_MODES = [
   { abbr: 'CW',  sources: ['CW'],        isSSB: false },
+  { abbr: 'SSB', sources: ['SSB'],       isSSB: true  },
   { abbr: 'RY',  sources: ['RTTY'],      isSSB: false },
   { abbr: 'FTx', sources: ['FT8','FT4'], isSSB: false },
-  { abbr: 'SSB', sources: ['SSB'],       isSSB: true  },
 ];
 const MODE_QUALITY_KEY = { CW: 'CW', RY: 'RTTY', FTx: 'FTx', SSB: 'SSB' };
 const MODE_QUALITY_COLORS = ['#00d250', '#e6c800', '#ff8c00', '#dc1e1e'];
