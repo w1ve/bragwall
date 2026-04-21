@@ -508,7 +508,11 @@ function buildModeRow(el, hasData, activeModes, modeSnr = {}) {
     const frac = qualityFractionForMode(qKey, qSnr);
     const pct = Math.round(frac * 100);
     const widthPct = (qSnr != null) ? Math.max(2, pct) : 0;
-    const qSegGradient = 'linear-gradient(90deg, #00d250 0 25%, #e6c800 25% 50%, #ff8c00 50% 75%, #dc1e1e 75% 100%)';
+    const g = '#00d250', y = '#e6c800', o = '#ff8c00', r = '#dc1e1e';
+    let qFillColor = g;
+    if (pct >= 75) qFillColor = r;
+    else if (pct >= 50) qFillColor = o;
+    else if (pct >= 25) qFillColor = y;
     if (!hasData) {
       span.className   = 'mode-label mode-dim';
       txt.textContent = abbr;
@@ -517,13 +521,13 @@ function buildModeRow(el, hasData, activeModes, modeSnr = {}) {
     } else if (active && isSSB) {
       span.className   = 'mode-label mode-ssb';
       txt.textContent = '\u2713' + abbr;
-      qBar.style.background = qSegGradient;
+      qBar.style.background = qFillColor;
       qBar.style.width = `${widthPct}%`;
       qBar.style.display = 'block';
     } else if (active) {
       span.className   = 'mode-label mode-active';
       txt.textContent = '\u2713' + abbr;
-      qBar.style.background = qSegGradient;
+      qBar.style.background = qFillColor;
       qBar.style.width = `${widthPct}%`;
       qBar.style.display = 'block';
     } else if (isSSB) {

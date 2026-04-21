@@ -250,13 +250,7 @@ h1 {
   max-width: calc(100% - 2px);
   height: 3px;
   border-radius: 0;
-  background: linear-gradient(
-    to right,
-    #00d250 0%, #00d250 25%,
-    #e6c800 25%, #e6c800 50%,
-    #ff8c00 50%, #ff8c00 75%,
-    #dc1e1e 75%, #dc1e1e 100%
-  );
+  background: transparent;
   opacity: 1;
   position: absolute;
   left: 1px;
