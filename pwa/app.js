@@ -68,11 +68,18 @@ const CARIBBEAN_REGION_INDEX = 3;
 const CARIBBEAN_CENTER = { lat: 17.0, lon: -72.0, radiusMiles: 950 };
 const REGION_LAND_KEY = ['NA', 'NA', 'NA', 'CAR', 'SA', 'EU', 'AF', 'AS', 'OC'];
 const WORLD_GEOJSON_SOURCES = [
-  'https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson',
   'https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json',
+  'https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson',
+];
+const US_STATES_GEOJSON_SOURCES = [
+  'https://raw.githubusercontent.com/PublicaMundi/MappingAPI/master/data/geojson/us-states.json',
+];
+const CANADA_PROVINCES_GEOJSON_SOURCES = [
+  'https://raw.githubusercontent.com/codeforgermany/click_that_hood/main/public/data/canada.geojson',
 ];
 let detailedWorldPolygons = null;
 let detailedWorldRegionPolygons = null;
+let detailedNorthAmericaSplitPolygons = null;
 let detailedWorldLoadPromise = null;
 let detailedWorldLoadFailed = false;
 const CARIBBEAN_COUNTRIES = new Set([
@@ -80,6 +87,7 @@ const CARIBBEAN_COUNTRIES = new Set([
   'Trinidad and Tobago', 'Barbados', 'Antigua and Barbuda', 'Dominica',
   'Saint Lucia', 'Saint Vincent and the Grenadines', 'Grenada',
   'Saint Kitts and Nevis', 'Aruba', 'Curacao', 'Curaçao', 'Guadeloupe', 'Martinique',
+  'Belize', 'Bermuda',
 ]);
 const SOUTH_AMERICA_COUNTRIES = new Set([
   'Argentina', 'Bolivia', 'Brazil', 'Chile', 'Colombia', 'Ecuador', 'Guyana',
@@ -93,10 +101,11 @@ const EUROPE_COUNTRIES = new Set([
   'Albania', 'Andorra', 'Austria', 'Belarus', 'Belgium', 'Bosnia and Herzegovina',
   'Bulgaria', 'Croatia', 'Czech Republic', 'Denmark', 'Estonia', 'Finland',
   'France', 'Germany', 'Greece', 'Hungary', 'Iceland', 'Ireland', 'Italy',
-  'Kosovo', 'Latvia', 'Lithuania', 'Luxembourg', 'Macedonia', 'Moldova',
+  'Kosovo', 'Latvia', 'Lithuania', 'Luxembourg', 'Macedonia', 'Moldova', 'Monaco',
   'Montenegro', 'Netherlands', 'Norway', 'Poland', 'Portugal', 'Romania',
   'Russia', 'Serbia', 'Slovakia', 'Slovenia', 'Spain', 'Sweden', 'Switzerland',
-  'Ukraine', 'United Kingdom', 'Northern Cyprus', 'Cyprus',
+  'Ukraine', 'United Kingdom', 'Northern Cyprus', 'Cyprus', 'Turkey', 'San Marino',
+  'Vatican', 'Vatican City', 'Faroe Islands', 'Gibraltar', 'Isle of Man', 'Jersey', 'Guernsey',
 ]);
 const AFRICA_COUNTRIES = new Set([
   'Algeria', 'Angola', 'Benin', 'Botswana', 'Burkina Faso', 'Burundi', 'Cameroon',
@@ -112,6 +121,45 @@ const AFRICA_COUNTRIES = new Set([
 const OCEANIA_COUNTRIES = new Set([
   'Australia', 'New Zealand', 'Papua New Guinea', 'Fiji',
   'Solomon Islands', 'Vanuatu', 'New Caledonia',
+]);
+const ENA_US_STATES = new Set([
+  'Maine', 'New Hampshire', 'Vermont', 'Massachusetts', 'Rhode Island', 'Connecticut',
+  'New York', 'New Jersey', 'Pennsylvania', 'Delaware', 'Maryland', 'District of Columbia',
+  'Alabama', 'Florida', 'Georgia', 'Kentucky', 'North Carolina', 'South Carolina', 'Tennessee',
+  'Virginia', 'Michigan', 'Ohio', 'West Virginia',
+]);
+const CNA_US_STATES = new Set([
+  'Illinois', 'Indiana', 'Wisconsin',
+  'Colorado', 'Iowa', 'Kansas', 'Minnesota', 'Missouri', 'Nebraska', 'North Dakota', 'South Dakota',
+  'Arkansas', 'Louisiana', 'Mississippi', 'New Mexico', 'Oklahoma', 'Texas',
+]);
+const WNA_US_STATES = new Set([
+  'Alaska', 'Arizona', 'California', 'Hawaii', 'Idaho', 'Montana',
+  'Nevada', 'Oregon', 'Utah', 'Washington', 'Wyoming',
+]);
+const ENA_CANADA_PROVINCES = new Set([
+  'Nova Scotia', 'New Brunswick', 'Prince Edward Island',
+  'Quebec', 'Ontario', 'Newfoundland and Labrador',
+]);
+const CNA_CANADA_PROVINCES = new Set([
+  'Manitoba', 'Saskatchewan', 'Alberta',
+]);
+const WNA_CANADA_PROVINCES = new Set([
+  'British Columbia', 'Yukon Territory', 'Northwest Territories', 'Nunavut',
+]);
+const CNA_NORTH_AMERICA_COUNTRIES = new Set([
+  'Mexico', 'Guatemala', 'Honduras', 'El Salvador', 'Nicaragua', 'Costa Rica', 'Panama',
+]);
+const COUNTRY_NAME_ALIASES = new Map([
+  ['United States of America', 'USA'],
+  ['Russian Federation', 'Russia'],
+  ['The Gambia', 'Gambia'],
+  ['Cote d\'Ivoire', 'Ivory Coast'],
+  ['Côte d\'Ivoire', 'Ivory Coast'],
+  ['Eswatini', 'eSwatini'],
+  ['Swaziland', 'eSwatini'],
+  ['United Republic of Tanzania', 'Tanzania'],
+  ['Republic of the Congo', 'Republic of the Congo'],
 ]);
 const CARIBBEAN_SOURCE_PREFIXES = [
   'KP1', 'KP2', 'KP4', 'WP4', 'NP4', 'VP9', 'CO', 'CM', 'HH', 'HI',
@@ -333,20 +381,63 @@ function countryNameForFeature(feature) {
   ).trim();
 }
 
+function canonicalCountryName(name) {
+  const raw = String(name || '').trim();
+  return COUNTRY_NAME_ALIASES.get(raw) || raw;
+}
+
 function pushRegionPolygons(regionMap, regionKey, rings) {
   if (!regionMap[regionKey]) regionMap[regionKey] = [];
   rings.forEach((ring) => regionMap[regionKey].push(ring));
 }
 
 function assignRegionKeyForCountry(name) {
-  if (!name) return null;
-  if (CARIBBEAN_COUNTRIES.has(name)) return 'CAR';
-  if (SOUTH_AMERICA_COUNTRIES.has(name)) return 'SA';
-  if (NORTH_AMERICA_COUNTRIES.has(name)) return 'NA';
-  if (EUROPE_COUNTRIES.has(name)) return 'EU';
-  if (AFRICA_COUNTRIES.has(name)) return 'AF';
-  if (OCEANIA_COUNTRIES.has(name)) return 'OC';
+  const canon = canonicalCountryName(name);
+  if (!canon) return null;
+  if (CARIBBEAN_COUNTRIES.has(canon)) return 'CAR';
+  if (SOUTH_AMERICA_COUNTRIES.has(canon)) return 'SA';
+  if (NORTH_AMERICA_COUNTRIES.has(canon)) return 'NA';
+  if (EUROPE_COUNTRIES.has(canon)) return 'EU';
+  if (AFRICA_COUNTRIES.has(canon)) return 'AF';
+  if (OCEANIA_COUNTRIES.has(canon)) return 'OC';
   return 'AS';
+}
+
+function extractNamedPolygons(geojson) {
+  const features = Array.isArray(geojson?.features) ? geojson.features : [];
+  const named = {};
+  features.forEach((feature) => {
+    const coords = feature?.geometry?.coordinates;
+    if (!coords) return;
+    const rings = flattenGeoCoordinates(coords, []);
+    if (!rings.length) return;
+    const name = canonicalCountryName(countryNameForFeature(feature));
+    if (!name) return;
+    named[name] ??= [];
+    rings.forEach((ring) => named[name].push(ring));
+  });
+  return named;
+}
+
+async function fetchGeoJsonFromSources(sources, timeoutMs = 7000) {
+  for (const url of sources) {
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      if (Array.isArray(data?.features) && data.features.length > 0) return data;
+    } catch {}
+  }
+  return null;
+}
+
+function collectPolygonsForNames(namedPolygons, names) {
+  const out = [];
+  names.forEach((name) => {
+    const canon = canonicalCountryName(name);
+    if (namedPolygons[canon]) out.push(...namedPolygons[canon]);
+  });
+  return out;
 }
 
 function extractRegionPolygons(geojson) {
@@ -365,6 +456,36 @@ function extractRegionPolygons(geojson) {
   return regionMap;
 }
 
+async function loadDetailedNorthAmericaSplitPolygons(worldGeojson) {
+  const worldNamed = extractNamedPolygons(worldGeojson);
+  const split = { ENA: [], CNA: [], WNA: [] };
+
+  // Country-level portions of North America in this model.
+  split.CNA.push(...collectPolygonsForNames(worldNamed, CNA_NORTH_AMERICA_COUNTRIES));
+  split.WNA.push(...collectPolygonsForNames(worldNamed, new Set(['Greenland'])));
+
+  const [usStatesGeo, canadaGeo] = await Promise.all([
+    fetchGeoJsonFromSources(US_STATES_GEOJSON_SOURCES),
+    fetchGeoJsonFromSources(CANADA_PROVINCES_GEOJSON_SOURCES),
+  ]);
+
+  if (usStatesGeo) {
+    const usNamed = extractNamedPolygons(usStatesGeo);
+    split.ENA.push(...collectPolygonsForNames(usNamed, ENA_US_STATES));
+    split.CNA.push(...collectPolygonsForNames(usNamed, CNA_US_STATES));
+    split.WNA.push(...collectPolygonsForNames(usNamed, WNA_US_STATES));
+  }
+  if (canadaGeo) {
+    const caNamed = extractNamedPolygons(canadaGeo);
+    split.ENA.push(...collectPolygonsForNames(caNamed, ENA_CANADA_PROVINCES));
+    split.CNA.push(...collectPolygonsForNames(caNamed, CNA_CANADA_PROVINCES));
+    split.WNA.push(...collectPolygonsForNames(caNamed, WNA_CANADA_PROVINCES));
+  }
+
+  if (split.ENA.length === 0 || split.CNA.length === 0 || split.WNA.length === 0) return null;
+  return split;
+}
+
 async function loadDetailedWorldPolygons() {
   if (detailedWorldPolygons) return detailedWorldPolygons;
   if (detailedWorldLoadPromise) return detailedWorldLoadPromise;
@@ -380,6 +501,7 @@ async function loadDetailedWorldPolygons() {
         if (polygons && polygons.length > 0) {
           detailedWorldPolygons = polygons;
           detailedWorldRegionPolygons = extractRegionPolygons(data);
+          detailedNorthAmericaSplitPolygons = await loadDetailedNorthAmericaSplitPolygons(data);
           detailedWorldLoadFailed = false;
           return detailedWorldPolygons;
         }
@@ -412,11 +534,20 @@ function drawHighlightedRegion(ctx, project, regionKey, regionIdx, w, h) {
   const regionPolys = detailedWorldRegionPolygons?.[regionKey] || null;
   const highlightFill = 'rgba(0, 210, 80, 0.78)';
   const highlightStroke = 'rgba(0, 169, 107, 0.95)';
+  const sourceRegionKey = SOURCE_REGION_KEYS[regionIdx];
+  const naSplitPolys = (sourceRegionKey === 'ENA' || sourceRegionKey === 'CNA' || sourceRegionKey === 'WNA')
+    ? detailedNorthAmericaSplitPolygons?.[sourceRegionKey]
+    : null;
   const naLonSplitByRegion = {
     2: [-130, -103], // W. North America (unchanged right edge relative to prior split)
     1: [-103, -85],  // C. North America (~300 miles wider)
     0: [-85, -52],   // E. North America (left edge moved east ~500 miles, extends to coast/ocean)
   };
+
+  if (naSplitPolys && naSplitPolys.length > 0) {
+    naSplitPolys.forEach((ring) => drawPolygon(ctx, ring, project, highlightFill, highlightStroke, 1.6));
+    return;
+  }
 
   if (regionPolys && regionPolys.length > 0) {
     if (regionKey === 'NA' && regionIdx >= 0 && regionIdx <= 2) {
