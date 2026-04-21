@@ -69,12 +69,12 @@ const BANDS = [
 
 // Full prefix table matching the PWA classifier
 const PREFIX_TABLE = [
-  ['W1','ENA'],['W2','ENA'],['W3','ENA'],['W4','ENA'],['W8','ENA'],['W9','ENA'],
-  ['K1','ENA'],['K2','ENA'],['K3','ENA'],['K4','ENA'],['K8','ENA'],['K9','ENA'],
-  ['N1','ENA'],['N2','ENA'],['N3','ENA'],['N4','ENA'],['N8','ENA'],['N9','ENA'],
+  ['W1','ENA'],['W2','ENA'],['W3','ENA'],['W4','ENA'],['W8','ENA'],
+  ['K1','ENA'],['K2','ENA'],['K3','ENA'],['K4','ENA'],['K8','ENA'],
+  ['N1','ENA'],['N2','ENA'],['N3','ENA'],['N4','ENA'],['N8','ENA'],
   ['VE1','ENA'],['VE2','ENA'],['VE3','ENA'],['VE9','ENA'],['VA1','ENA'],['VA2','ENA'],['VA3','ENA'],
   ['KP2','ENA'],['KP4','ENA'],['WP4','ENA'],['NP4','ENA'],['VP9','ENA'],['CO','ENA'],['HH','ENA'],['HI','ENA'],
-  ['W0','CNA'],['W5','CNA'],['K0','CNA'],['K5','CNA'],['N0','CNA'],['N5','CNA'],
+  ['W0','CNA'],['W5','CNA'],['W9','CNA'],['K0','CNA'],['K5','CNA'],['K9','CNA'],['N0','CNA'],['N5','CNA'],['N9','CNA'],
   ['VE4','CNA'],['VE5','CNA'],['XE','CNA'],['TI','CNA'],['YN','CNA'],['HR','CNA'],['TG','CNA'],['YS','CNA'],
   ['W6','WNA'],['W7','WNA'],['K6','WNA'],['K7','WNA'],['N6','WNA'],['N7','WNA'],
   ['VE6','WNA'],['VE7','WNA'],['KH6','WNA'],['KL','WNA'],['WL','WNA'],['NL','WNA'],
