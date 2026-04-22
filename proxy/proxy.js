@@ -1239,10 +1239,11 @@ function buildAudioReportText(params, bandResults, solar = {}) {
     lines.push(`On ${bandSpoken}, the average signal to noise ratio is ${spokenSnr(b.snr)}.`);
 
     // Mode spots — only if checkbox is checked
+    // Build mode list: FTx first, then CW, then RTTY
     const reportedModes = [];
-    if (params.cwChecked  && b.modes && b.modes.has('CW'))   reportedModes.push('CW');
-    if (params.rttyChecked && b.modes && b.modes.has('RTTY')) reportedModes.push('RTTY');
     if (params.ftxChecked  && b.modes && (b.modes.has('FT8') || b.modes.has('FT4'))) reportedModes.push('FT eight or FT Four');
+    if (params.cwChecked   && b.modes && b.modes.has('CW'))   reportedModes.push('CW');
+    if (params.rttyChecked && b.modes && b.modes.has('RTTY')) reportedModes.push('RTTY');
 
     if (reportedModes.length === 1) {
       lines.push(`${reportedModes[0]} spots have been reported.`);
@@ -1254,8 +1255,8 @@ function buildAudioReportText(params, bandResults, solar = {}) {
       lines.push(`${rest}, and ${last} spots have been reported.`);
     }
 
-    if (params.ssb && b.ssbOk) {
-      lines.push(`Signal levels reported support SSB contacts.`);
+    if (b.ssbOk) {
+      lines.push(`Signal levels will support SSB contacts.`);
     }
   }
 
