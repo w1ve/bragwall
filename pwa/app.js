@@ -1081,16 +1081,18 @@ class RegionMeter {
   constructor() { this.reset(); }
 
   reset() {
-    this.hasValue     = new Array(BANDS.length).fill(false);
-    this.ema          = new Array(BANDS.length).fill(0);
-    this.peak         = new Array(BANDS.length).fill(0);
-    this.spotCount    = new Array(BANDS.length).fill(0);
-    this.currentModes = Array.from({length: BANDS.length}, () => new Set());
+    this.hasValue       = new Array(BANDS.length).fill(false);
+    this.ema            = new Array(BANDS.length).fill(0);
+    this.peak           = new Array(BANDS.length).fill(0);
+    this.spotCount      = new Array(BANDS.length).fill(0);
+    this.currentModes   = Array.from({length: BANDS.length}, () => new Set());
+    this.modeAbsence    = Array.from({length: BANDS.length}, () => ({}));
+    this._seenThisCycle = Array.from({length: BANDS.length}, () => new Set());
   }
 
-  // Call at start of each poll cycle — clears mode sets, preserves EMA/peak
+  // Call at start of each poll cycle — reset per-cycle "seen" tracker only; modes persist
   beginPollCycle() {
-    this.currentModes = Array.from({length: BANDS.length}, () => new Set());
+    this._seenThisCycle = Array.from({length: BANDS.length}, () => new Set());
   }
 
   addSample(bandIdx, snr, mode) {
@@ -1104,7 +1106,11 @@ class RegionMeter {
       this.peak[bandIdx] = this.ema[bandIdx];
     this.spotCount[bandIdx]++;
     const nm = normaliseMode(mode);
-    if (nm) this.currentModes[bandIdx].add(nm);
+    if (nm) {
+      this.currentModes[bandIdx].add(nm);
+      this._seenThisCycle[bandIdx].add(nm);
+      this.modeAbsence[bandIdx][nm] = 0;
+    }
   }
 
   // Drain stale readings when a band receives no samples this poll
@@ -1116,6 +1122,24 @@ class RegionMeter {
       this.ema[bandIdx]  = 0;
       this.peak[bandIdx] = 0;
       this.hasValue[bandIdx] = false;
+    }
+  }
+
+  // Call after each poll cycle to age out modes that haven't appeared recently
+  endPollCycle() {
+    const MODE_DECAY_CYCLES = 4; // keep badge alive for ~4 missed polls before clearing
+    for (let bi = 0; bi < BANDS.length; bi++) {
+      const seen    = this._seenThisCycle[bi];
+      const absence = this.modeAbsence[bi];
+      for (const m of Array.from(this.currentModes[bi])) {
+        if (!seen.has(m)) {
+          absence[m] = (absence[m] || 0) + 1;
+          if (absence[m] >= MODE_DECAY_CYCLES) {
+            this.currentModes[bi].delete(m);
+            delete absence[m];
+          }
+        }
+      }
     }
   }
 
@@ -1751,6 +1775,9 @@ async function pollOnce(revisionAtRequest = refreshRevision) {
     for (let bi = 0; bi < BANDS.length; bi++)
       if (!sampled[ri][bi]) meters[ri].decayBand(bi);
 
+  // Age out modes that weren't seen this cycle
+  meters.forEach(m => m.endPollCycle());
+
   const modeQualityByBand = collapseModeSamples(modeSamples, meters);
 
   // Overlay FTx quality from PSKReporter by from/to region + band.
@@ -2065,22 +2092,30 @@ async function requestAudioReport() {
   const ctrl = new AbortController();
   audioAbortCtrl = ctrl;
 
-  // Play the waiting message immediately while the real report generates
-  let waitingAudio = null;
-  try {
-    const waitResp = await fetch('/audio/waiting');
-    if (waitResp.ok) {
-      const waitBlob = await waitResp.blob();
-      const waitUrl = URL.createObjectURL(waitBlob);
-      waitingAudio = new Audio(waitUrl);
+  // Fire both fetches in parallel — waiting audio plays immediately, report generates in background
+  const waitingFetchPromise = fetch('/audio/waiting').then(async r => {
+    if (!r.ok) return null;
+    const blob = await r.blob();
+    return URL.createObjectURL(blob);
+  }).catch(() => null);
+
+  const reportFetchPromise = fetch(url, { signal: ctrl.signal });
+
+  // Play waiting audio as soon as it's ready (doesn't block report fetch)
+  waitingFetchPromise.then(waitUrl => {
+    if (!waitUrl) return;
+    // Only play if we're still in loading state (report hasn't arrived yet)
+    if (audioAbortCtrl === ctrl) {
+      const waitingAudio = new Audio(waitUrl);
       audioElement = waitingAudio;
       setAudioButtonState('playing');
-      await waitingAudio.play().catch(() => {});
+      waitingAudio.play().catch(() => {});
+      waitingAudio.onended = () => { URL.revokeObjectURL(waitUrl); };
     }
-  } catch {}
+  });
 
   try {
-    const resp = await fetch(url, { signal: ctrl.signal });
+    const resp = await reportFetchPromise;
     if (!resp.ok) {
       let details = '';
       try {

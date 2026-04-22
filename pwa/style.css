@@ -513,8 +513,13 @@ body.theme-cb .theme-btn.active {
   cursor: wait;
 }
 
+@keyframes audio-spin {
+  to { transform: rotate(360deg); }
+}
 .vantage-audio-btn.loading {
-  opacity: 0.75;
+  opacity: 0.85;
+  animation: audio-spin 1s linear infinite;
+  cursor: wait;
 }
 
 .vantage-audio-btn.playing {

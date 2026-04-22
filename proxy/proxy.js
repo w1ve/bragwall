@@ -1088,7 +1088,7 @@ function finalizeBandResults(params, bandState) {
       sUnit: hasSignal ? snrToSUnit(combined) : null,
       modes: modes,
       cwRttyFtx: hasSignal && (modes.has('CW') || modes.has('RTTY') || modes.has('FT8') || modes.has('FT4')),
-      ssbOk: !!params.ssb && hasSignal, // trust client-side threshold check
+      ssbOk: hasSignal && combined >= SSB_SNR_THRESHOLD, // per-band threshold
     };
   }
   return out;
