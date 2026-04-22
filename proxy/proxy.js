@@ -1271,8 +1271,9 @@ function buildAudioReportText(params, bandResults, solar = {}) {
         }
       }
 
-      if (noSignal.length) {
-        lines.push(`${joinBands(noSignal)} have no reported signals.`);
+      // Each no-signal band gets its own short line
+      for (const band of noSignal) {
+        lines.push(`On ${bandLabelSpoken(band)}, no signals are reported.`);
       }
     }
   }
