@@ -24,6 +24,8 @@ const SSB_SNR_THRESHOLD = parseFloat(process.env.SSB_SNR_THRESHOLD || '20');
 const AUDIO_CACHE_MS = parseInt(process.env.AUDIO_CACHE_MS || String(15 * 60 * 1000), 10);
 const AUDIO_CACHE_DIR = process.env.AUDIO_CACHE_DIR || '/tmp/hfsignals-audio-cache';
 const WAITING_AUDIO_PATH = path.join(AUDIO_CACHE_DIR, 'waiting-message.mp3');
+const OUTRO_AUDIO_PATH   = path.join(AUDIO_CACHE_DIR, 'outro-static.mp3');
+const OUTRO_TEXT = 'We depend on free data sources for this site. Thanks to N O A A, the Reverse Beacon Network, and PSKReporter for their free real-time data. This is a hobby site created by Gerry, W 1 V E. Enjoy!';
 const AUDIO_GRID_LOOKUP_LIMIT = parseInt(process.env.AUDIO_GRID_LOOKUP_LIMIT || '240', 10);
 const AUDIO_HAMDB_CACHE_MS = parseInt(process.env.AUDIO_HAMDB_CACHE_MS || String(24 * 60 * 60 * 1000), 10);
 const AUDIO_HAMDB_NEG_CACHE_MS = parseInt(process.env.AUDIO_HAMDB_NEG_CACHE_MS || String(3 * 60 * 60 * 1000), 10);
@@ -1350,9 +1352,9 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
         const bandSpoken = bandLabelSpoken(b.band);
         lines.push(`On ${bandSpoken}, the average signal to noise ratio is ${spokenSnr(b.snr)}.`);
 
-        // Build mode list from actual data — FTx first, then CW, then RTTY
+        // Build mode list from actual data — digital first, then CW, then RTTY
         const reportedModes = [];
-        if (b.modes && (b.modes.has('FT8') || b.modes.has('FT4'))) reportedModes.push('FT eight or FT Four');
+        if (b.modes && (b.modes.has('FT8') || b.modes.has('FT4'))) reportedModes.push('digital');
         if (b.modes && b.modes.has('CW'))   reportedModes.push('CW');
         if (b.modes && b.modes.has('RTTY')) reportedModes.push('RTTY');
 
@@ -1379,12 +1381,12 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
     }
   }
 
-  lines.push('Go to H F Signals dot live for the latest data.');
+  // Dynamic closing: point-in-time note with counts, then "go to" CTA.
+  // Static attribution + W1VE outro is appended as a pre-rendered MP3 (see OUTRO_AUDIO_PATH).
   const skimmers = sourceStats.skimmers || 0;
   const ftxCount = sourceStats.ftxCount || 0;
   lines.push(`Please note this is point-in-time data, and may differ from the H F Signals dot live view. ${skimmers} skimmers and ${ftxCount} F T x reports were used to create this report.`);
-  lines.push('We depend on free data sources for this site. Thanks to N O A A, the Reverse Beacon Network, and PSKReporter for their free real-time data.');
-  lines.push('This is a hobby site created by Gerry, W 1 V E. Enjoy!');
+  lines.push('Go to H F Signals dot live for the latest data.');
 
   return lines.join(' ');
 }
@@ -1735,8 +1737,28 @@ async function serveAudioPropReport(req, res, query = {}) {
 
   try {
     await deleteMatchingAudio(prefix);
-    await streamAsyncTtsToFile(transcript, params.lang, outPath);
-    sendAudioFile(res, outPath, true, params.lang);
+    // Generate the dynamic portion first
+    const dynamicPath = `${outPath}.dynamic-tmp`;
+    await streamAsyncTtsToFile(transcript, params.lang, dynamicPath);
+
+    // Stitch static outro (English only — skip for translated reports)
+    let finalPath = dynamicPath;
+    if (params.lang === 'en' || !params.lang) {
+      try {
+        await ensureOutroAudio();
+        await concatMp3Files(dynamicPath, OUTRO_AUDIO_PATH, outPath);
+        await fs.promises.unlink(dynamicPath).catch(() => {});
+        finalPath = outPath;
+      } catch (stitchErr) {
+        console.warn('[audio] outro stitch failed, serving dynamic only:', stitchErr?.message);
+        await fs.promises.rename(dynamicPath, outPath).catch(() => {});
+        finalPath = outPath;
+      }
+    } else {
+      await fs.promises.rename(dynamicPath, outPath).catch(() => {});
+    }
+
+    sendAudioFile(res, finalPath, true, params.lang);
   } catch (e) {
     console.error('[audio] generation failed:', e?.message || e);
     sendJson(res, 502, { error: 'audio_generation_failed', reason: String(e?.message || e || 'unknown') });
@@ -1897,8 +1919,44 @@ const server = http.createServer(async (req, res) => {
   send(res, 404, 'text/plain', 'Not found');
 });
 
+// ── Static outro audio (attribution + W1VE sign-off) ────────────────────────
+let outroAudioGenerating = false;
+
+async function ensureOutroAudio() {
+  if (outroAudioGenerating) return;
+  try {
+    await fs.promises.access(OUTRO_AUDIO_PATH);
+    return; // already exists
+  } catch {}
+  if (!ASYNC_API_KEY) return;
+  outroAudioGenerating = true;
+  try {
+    await ensureAudioCacheDir();
+    await streamAsyncTtsToFile(OUTRO_TEXT, 'en', OUTRO_AUDIO_PATH);
+    console.log('[audio] outro generated');
+  } catch (e) {
+    console.warn('[audio] outro generation failed:', e?.message || e);
+  } finally {
+    outroAudioGenerating = false;
+  }
+}
+
+// Concatenate two MP3 files by simple byte concatenation (valid for CBR/same-format MP3s)
+async function concatMp3Files(part1Path, part2Path, outPath) {
+  const [a, b] = await Promise.all([
+    fs.promises.readFile(part1Path),
+    fs.promises.readFile(part2Path),
+  ]);
+  const tmp = `${outPath}.concat-tmp`;
+  await fs.promises.writeFile(tmp, Buffer.concat([a, b]));
+  await fs.promises.rename(tmp, outPath);
+}
+
 // Pre-generate waiting audio in background at startup
 ensureAudioCacheDir().then(() => ensureWaitingAudio()).catch(() => {});
+
+// Pre-generate static outro in background at startup
+ensureAudioCacheDir().then(() => ensureOutroAudio()).catch(() => {});
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`RBN proxy listening on 0.0.0.0:${PORT}`);
