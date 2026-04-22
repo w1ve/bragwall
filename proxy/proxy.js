@@ -825,6 +825,9 @@ function stableAudioParamKey(params) {
     lang: params.lang,
     timeOfDay: params.timeOfDay,
     ssb: !!params.ssb,
+    cw: !!params.cwChecked,
+    rtty: !!params.rttyChecked,
+    ftx: !!params.ftxChecked,
   };
   return JSON.stringify(obj);
 }
