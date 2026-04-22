@@ -1159,25 +1159,28 @@ async function reverseGeoGrid(grid) {
     const countryLabel = isNorthAmerica ? null : (addr.country || null);
 
     // Build display string:  "Clarendon, PA"  /  "Halifax, NS"  /  "London, United Kingdom"
+    // If no city/town — fall back to full state name (cleaner than bare abbreviation)
+    const stateFull = addr.state ? addr.state.split(' / ')[0].trim() : null; // handle "New Brunswick / Nouveau-Brunswick"
     let display = null;
     if (place) {
       const suffix = stateCode || countryLabel;
       display = suffix ? `${place}, ${suffix}` : place;
-    } else if (stateCode) {
-      display = stateCode;
+    } else if (stateFull) {
+      // No city — show "New Brunswick, Canada" or just "New Brunswick" for US/CA
+      display = isNorthAmerica ? stateFull : `${stateFull}, ${addr.country}`;
     } else if (countryLabel) {
       display = countryLabel;
     }
 
-    // Spoken version for audio — same structure but full state name for US/CA
+    // Spoken version for audio — full state name always
     let spoken = null;
     if (place) {
       const spokenSuffix = isNorthAmerica
-        ? (addr.state || stateCode || null)   // full name: "Pennsylvania"
+        ? (stateFull || stateCode || null)
         : (addr.country || null);
       spoken = spokenSuffix ? `${place}, ${spokenSuffix}` : place;
-    } else if (addr.state) {
-      spoken = addr.state;
+    } else if (stateFull) {
+      spoken = isNorthAmerica ? stateFull : `${stateFull}, ${addr.country}`;
     } else if (addr.country) {
       spoken = addr.country;
     }

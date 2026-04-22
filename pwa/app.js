@@ -2112,6 +2112,7 @@ function wireAudioControls() {
 
 // ── Grid place-name cache (fetched from /gridinfo) ───────────────────────────
 const _gridPlaceCache = {};  // grid4 → placeName | null | 'pending'
+let _gridPlaceFetchTimer = null;
 
 async function fetchGridPlaceName(grid4) {
   const key = grid4.toUpperCase().slice(0, 4);
@@ -2147,25 +2148,40 @@ function updateVantageDisplay() {
   // Update place-name sub-line for grid mode
   const placeEl = document.getElementById('vantage-place-name');
   if (placeEl) {
-    if (v.mode === 'grid' && v.grid && v.grid.length >= 4) {
-      const cached = _gridPlaceCache[v.grid.toUpperCase().slice(0, 4)];
-      if (cached && cached !== 'pending') {
-        placeEl.textContent = cached;
-        placeEl.style.display = '';
-      } else if (!cached) {
-        placeEl.textContent = '';
-        placeEl.style.display = 'none';
-        fetchGridPlaceName(v.grid).then(name => {
-          // Only update if grid hasn't changed
+    const grid4 = (v.mode === 'grid' && v.grid && v.grid.length >= 4)
+      ? v.grid.toUpperCase().slice(0, 4) : null;
+
+    if (grid4 && isValidGrid(grid4)) {
+      const cached = _gridPlaceCache[grid4];
+      if (cached !== undefined && cached !== 'pending') {
+        // Already in cache — show immediately
+        placeEl.textContent = cached || '';
+        placeEl.style.display = cached ? '' : 'none';
+      } else if (cached === undefined) {
+        // Not yet fetched — keep existing text, debounce the fetch
+        if (_gridPlaceFetchTimer) clearTimeout(_gridPlaceFetchTimer);
+        _gridPlaceFetchTimer = setTimeout(() => {
+          _gridPlaceFetchTimer = null;
           const cur = currentVantageState();
-          const plEl = document.getElementById('vantage-place-name');
-          if (plEl && cur.mode === 'grid' && cur.grid && cur.grid.toUpperCase().slice(0,4) === v.grid.toUpperCase().slice(0,4)) {
-            plEl.textContent = name || '';
-            plEl.style.display = name ? '' : 'none';
-          }
-        });
+          const curGrid4 = (cur.mode === 'grid' && cur.grid && cur.grid.length >= 4)
+            ? cur.grid.toUpperCase().slice(0, 4) : null;
+          if (curGrid4 !== grid4) return; // grid changed while waiting
+          fetchGridPlaceName(grid4).then(name => {
+            const plEl = document.getElementById('vantage-place-name');
+            const now = currentVantageState();
+            const nowGrid4 = (now.mode === 'grid' && now.grid && now.grid.length >= 4)
+              ? now.grid.toUpperCase().slice(0, 4) : null;
+            if (plEl && nowGrid4 === grid4) {
+              plEl.textContent = name || '';
+              plEl.style.display = name ? '' : 'none';
+            }
+          });
+        }, 600); // 600 ms after last keystroke
       }
+      // if 'pending' — leave display as-is while fetch is in flight
     } else {
+      // Not grid mode or incomplete/invalid grid
+      if (_gridPlaceFetchTimer) { clearTimeout(_gridPlaceFetchTimer); _gridPlaceFetchTimer = null; }
       placeEl.textContent = '';
       placeEl.style.display = 'none';
     }
