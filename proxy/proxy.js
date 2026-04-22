@@ -1039,8 +1039,10 @@ async function collectRbnBandResults(params) {
 }
 
 function augmentWithPskBandResults(params, bandState) {
-  if (!pskCacheData) return;
+  // Region mode uses pskCacheData; grid mode uses pskCacheReports.
+  // Do NOT short-circuit grid mode just because pskCacheData is null.
   if (params.mode === 'region') {
+    if (!pskCacheData) return;
     for (const toRegion of params.toRegions) {
       for (const band of params.bands) {
         const entry = pskCacheData?.[params.fromRegion]?.[toRegion]?.[band];
