@@ -756,21 +756,11 @@ function drawGridVantageMap(canvas, grid, radiusMiles, radiusLabel) {
   ctx.fillText(radiusLabel, lx, ly + 14);
 }
 
-// ── S-unit label ──────────────────────────────────────────────────────────────
+// ── SNR dB label ─────────────────────────────────────────────────────────────
 function snrToSUnit(snr) {
-  if (snr <  1) return 'S0';
-  if (snr <  5) return 'S1';
-  if (snr <  9) return 'S2';
-  if (snr < 13) return 'S3';
-  if (snr < 17) return 'S4';
-  if (snr < 21) return 'S5';
-  if (snr < 25) return 'S6';
-  if (snr < 31) return 'S7';
-  if (snr < 37) return 'S8';
-  if (snr < 43) return 'S9';
-  if (snr < 53) return 'S9+10';
-  if (snr < 63) return 'S9+20';
-  return 'S9+30';
+  const db = Math.round(snr);
+  if (db >= 0) return '+' + db + 'dB';
+  return db + 'dB';
 }
 
 function median(nums) {
@@ -2411,3 +2401,4 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   });
 }
+
