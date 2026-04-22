@@ -32,13 +32,19 @@ const DATA_TTL_MS  = 60  * 1000;   // re-fetch spot data every 60s
 const CACHE_TTL_MS = 10  * 60 * 1000;  // reuse rendered PNG for 10 min
 const MAX_AGE_MS   = 30  * 60 * 1000;  // delete cached images older than 30 min
 
-// Use the internal proxy which has live spot feed data
+// Use the internal proxy which has live spot feed + PSK aggregates.
 const RBN_URL = process.env.RBN_PROXY_URL || 'http://rbn-smeter:3001/rbn';
+const PSK_URL = process.env.PSK_PROXY_URL || 'http://rbn-smeter:3001/psk';
 
 // ── Shared RBN data state ─────────────────────────────────────────────────────
 let rbnData       = null;   // parsed JSON from last fetch
 let rbnFetchedAt  = 0;      // timestamp of last successful fetch
 let rbnFetching   = false;  // prevent concurrent fetches
+
+// ── Shared PSK aggregate state ────────────────────────────────────────────────
+let pskData       = null;   // parsed JSON payload from /psk
+let pskFetchedAt  = 0;      // timestamp of last successful fetch
+let pskFetching   = false;  // prevent concurrent fetches
 
 // ── PNG cache ─────────────────────────────────────────────────────────────────
 // Map<cacheKey, { png: Buffer, createdAt: number }>
@@ -67,20 +73,24 @@ const BANDS = [
   { label: '6m',   min: 50000, max: 54000 },
 ];
 
-// Full prefix table matching the PWA classifier
+// Full prefix table matching the PWA classifier, with explicit Caribbean splits.
 const PREFIX_TABLE = [
   ['W1','ENA'],['W2','ENA'],['W3','ENA'],['W4','ENA'],['W8','ENA'],
   ['K1','ENA'],['K2','ENA'],['K3','ENA'],['K4','ENA'],['K8','ENA'],
   ['N1','ENA'],['N2','ENA'],['N3','ENA'],['N4','ENA'],['N8','ENA'],
   ['VE1','ENA'],['VE2','ENA'],['VE3','ENA'],['VE9','ENA'],['VA1','ENA'],['VA2','ENA'],['VA3','ENA'],
-  ['KP2','ENA'],['KP4','ENA'],['WP4','ENA'],['NP4','ENA'],['VP9','ENA'],['CO','ENA'],['HH','ENA'],['HI','ENA'],
+  ['KP2','CAR'],['KP4','CAR'],['WP2','CAR'],['WP4','CAR'],['NP2','CAR'],['NP4','CAR'],['VP9','CAR'],
+  ['VP2E','CAR'],['VP2V','CAR'],['VP2M','CAR'],['VP5','CAR'],['PJ','CAR'],['ZF','CAR'],['C6','CAR'],
+  ['V2','CAR'],['V3','CAR'],['V4','CAR'],['J3','CAR'],['J6','CAR'],['J7','CAR'],['J8','CAR'],['6Y','CAR'],
+  ['8P','CAR'],['9Y','CAR'],['9Z','CAR'],['FG','CAR'],['FM','CAR'],['FS','CAR'],['FJ','CAR'],
+  ['CO','CAR'],['CL','CAR'],['CM','CAR'],['T4','CAR'],['HH','CAR'],['HI','CAR'],
   ['W0','CNA'],['W5','CNA'],['W9','CNA'],['K0','CNA'],['K5','CNA'],['K9','CNA'],['N0','CNA'],['N5','CNA'],['N9','CNA'],
-  ['VE4','CNA'],['VE5','CNA'],['XE','CNA'],['TI','CNA'],['YN','CNA'],['HR','CNA'],['TG','CNA'],['YS','CNA'],
+  ['VE4','CNA'],['VE5','CNA'],['VE6','CNA'],['VA4','CNA'],['VA5','CNA'],['VA6','CNA'],
+  ['XE','CNA'],['TI','CNA'],['YN','CNA'],['HR','CNA'],['TG','CNA'],['YS','CNA'],
   ['W6','WNA'],['W7','WNA'],['K6','WNA'],['K7','WNA'],['N6','WNA'],['N7','WNA'],
-  ['VE6','CNA'],['VA6','CNA'],
-  ['VE7','WNA'],['VA7','WNA'],['KH6','WNA'],['KL','WNA'],['WL','WNA'],['NL','WNA'],
+  ['VE7','WNA'],['VA7','WNA'],['VY1','WNA'],['KH6','WNA'],['KL','WNA'],['WL','WNA'],['NL','WNA'],['AL','WNA'],
   ['PY','SA'],['PP','SA'],['LU','SA'],['CE','SA'],['OA','SA'],['HC','SA'],['HK','SA'],
-  ['YV','SA'],['CX','SA'],['ZP','SA'],['CP','SA'],['GY','SA'],['VP8','SA'],
+  ['YV','SA'],['YY','SA'],['CX','SA'],['ZP','SA'],['CP','SA'],['GY','SA'],['PZ','SA'],['FY','SA'],['VP8','SA'],
   ['GM','EU'],['GW','EU'],['GI','EU'],['GD','EU'],['GJ','EU'],['GU','EU'],['G','EU'],['M','EU'],
   ['F','EU'],['DL','EU'],['DJ','EU'],['DK','EU'],['OE','EU'],['PA','EU'],['ON','EU'],
   ['SM','EU'],['SA','EU'],['OH','EU'],['LA','EU'],['OZ','EU'],['TF','EU'],['EI','EU'],
@@ -106,6 +116,7 @@ const REGIONS = [
   { key: 'ENA', label: 'E. N. America' },
   { key: 'CNA', label: 'C. N. America' },
   { key: 'WNA', label: 'W. N. America' },
+  { key: 'CAR', label: 'Caribbean'     },
   { key: 'SA',  label: 'S. America'    },
   { key: 'EU',  label: 'Europe'        },
   { key: 'AF',  label: 'Africa'        },
@@ -116,27 +127,36 @@ const REGIONS = [
 // Region key aliases the API accepts
 const REGION_ALIASES = {
   'NA': 'ENA', 'ENA': 'ENA', 'CNA': 'CNA', 'WNA': 'WNA',
+  'CAR': 'CAR', 'CARIBBEAN': 'CAR',
   'SA': 'SA',  'EU': 'EU',   'AF': 'AF',   'AS': 'AS', 'OC': 'OC',
   'E.NA': 'ENA', 'W.NA': 'WNA', 'C.NA': 'CNA',
 };
 
 const SSB_THRESHOLD = 20.0;
 const MAX_SNR       = 50.0;
-const EMA_ALPHA     = 0.08;
+const CARIBBEAN_CENTER = { lat: 17.0, lon: -72.0, radiusMiles: 950 };
 
 // ── Callsign → region classifier (simplified) ─────────────────────────────────
 function classifyCall(call) {
   if (!call) return null;
-  const c = call.toUpperCase().split('/')[0];
-  for (const [pfx, key] of PREFIX_TABLE) {
-    if (c.startsWith(pfx)) return key;
+  const raw = String(call).toUpperCase().trim();
+  if (!raw) return null;
+  const parts = raw.split('/')
+    .map((s) => s.replace(/[^A-Z0-9]/g, ''))
+    .filter(Boolean);
+  const candidates = parts.length ? parts : [raw];
+  for (const c of candidates) {
+    for (const [pfx, key] of PREFIX_TABLE) {
+      if (c.startsWith(pfx)) return key;
+    }
   }
   // US fallback
-  if (/^[WKN]/.test(c)) {
+  for (const c of candidates) {
+    if (!/^[WKN]/.test(c)) continue;
     for (const ch of c) {
       if (ch >= '0' && ch <= '9') {
         const d = parseInt(ch);
-        if (d === 0 || d === 5) return 'CNA';
+        if (d === 0 || d === 5 || d === 9) return 'CNA';
         if (d === 6 || d === 7) return 'WNA';
         return 'ENA';
       }
@@ -190,6 +210,22 @@ function distanceMiles(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
+function regionFromLatLon(lat, lon) {
+  const dCar = distanceMiles(lat, lon, CARIBBEAN_CENTER.lat, CARIBBEAN_CENTER.lon);
+  if (dCar <= CARIBBEAN_CENTER.radiusMiles && lat >= 8 && lat <= 30 && lon >= -92 && lon <= -56) return 'CAR';
+  if (lat > 15 && lon >= -170 && lon <= -50) {
+    if (lon >= -85) return 'ENA';
+    if (lon >= -105) return 'CNA';
+    return 'WNA';
+  }
+  if (lat >= -60 && lat <= 15 && lon >= -82 && lon <= -34) return 'SA';
+  if (lat >= 35 && lat <= 72 && lon >= -12 && lon <= 45) return 'EU';
+  if (lat >= -35 && lat <= 40 && lon >= -20 && lon <= 55) return 'AF';
+  if (lat >= -10 && lat <= 75 && lon >= 45) return 'AS';
+  if (lat <= 0 && lon >= 100) return 'OC';
+  return null;
+}
+
 function snrToSUnit(snr) {
   if (snr < 1)  return 'S0';
   if (snr < 5)  return 'S1';
@@ -210,6 +246,34 @@ function normMode(raw) {
   if (u==='CW') return 'CW'; if (u==='RTTY') return 'RTTY';
   if (u==='FT8') return 'FT8'; if (u==='FT4') return 'FT4';
   return '';
+}
+
+function median(nums) {
+  if (!nums || nums.length === 0) return null;
+  const sorted = nums.slice().sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function round1(v) {
+  return Math.round(v * 10) / 10;
+}
+
+function ftxSnrToRbnScale(ftxSnr) {
+  if (ftxSnr == null || Number.isNaN(ftxSnr)) return null;
+  const minDb = -20;
+  const maxDb = 20;
+  const frac = Math.max(0, Math.min((ftxSnr - minDb) / (maxDb - minDb), 1));
+  return 2 + frac * 20;
+}
+
+function qualityFractionForMode(modeKey, snr) {
+  if (snr == null || Number.isNaN(snr)) return 0;
+  if (modeKey === 'FTx') {
+    const minDb = -20;
+    const maxDb = 20;
+    return Math.max(0, Math.min((snr - minDb) / (maxDb - minDb), 1));
+  }
+  return Math.max(0, Math.min(snr / MAX_SNR, 1));
 }
 
 // ── Fetch RBN data (shared, cached 60s) ───────────────────────────────────────
@@ -252,13 +316,106 @@ async function getRbnData() {
   return rbnData;
 }
 
-// ── Compute SNR metrics from raw RBN data ─────────────────────────────────────
-function computeRegionBand(data, fromRegionKey, toRegionKey, bandLabel) {
-  // Returns { snr, modes, hasData }
-  const band = BANDS.find(b => b.label === bandLabel);
-  if (!band || !data) return { snr: 0, modes: new Set(), hasData: false };
+function fetchPsk() {
+  const transport = PSK_URL.startsWith('https') ? https : http;
+  return new Promise((resolve, reject) => {
+    const req = transport.request(PSK_URL, { headers: { 'User-Agent': 'hfsignals-badge/1.0' }, timeout: 25000 }, res => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        try {
+          const payload = JSON.parse(Buffer.concat(chunks).toString());
+          resolve(payload);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.on('error', reject);
+    req.end();
+  });
+}
 
-  const samples = [], modes = new Set();
+async function getPskData() {
+  const now = Date.now();
+  if (pskData && (now - pskFetchedAt) < DATA_TTL_MS) return pskData;
+  if (pskFetching) {
+    await new Promise(r => setTimeout(r, 500));
+    return pskData;
+  }
+  pskFetching = true;
+  try {
+    pskData = await fetchPsk();
+    pskFetchedAt = Date.now();
+  } catch (e) {
+    console.error('PSK fetch failed:', e.message);
+  } finally {
+    pskFetching = false;
+  }
+  return pskData;
+}
+
+// ── Compute SNR metrics from raw RBN data ─────────────────────────────────────
+function emptyModeQuality() {
+  return { CW: null, RTTY: null, FTx: null, SSB: null };
+}
+
+function medianOrNull(values) {
+  const m = median(values);
+  return m == null ? null : round1(m);
+}
+
+function finalizeRbnResult(samples, modes, modeSamples) {
+  if (!samples.length) {
+    return {
+      snr: 0,
+      modes,
+      hasData: false,
+      rbnCount: 0,
+      ftxCount: 0,
+      modeQuality: emptyModeQuality(),
+    };
+  }
+  const med = median(samples);
+  if (med == null) {
+    return {
+      snr: 0,
+      modes,
+      hasData: false,
+      rbnCount: 0,
+      ftxCount: 0,
+      modeQuality: emptyModeQuality(),
+    };
+  }
+  if (med >= SSB_THRESHOLD) modes.add('SSB');
+  return {
+    snr: round1(med),
+    modes,
+    hasData: true,
+    rbnCount: samples.length,
+    ftxCount: 0,
+    modeQuality: {
+      CW: medianOrNull(modeSamples.CW),
+      RTTY: medianOrNull(modeSamples.RTTY),
+      FTx: medianOrNull(modeSamples.FT8.concat(modeSamples.FT4)),
+      SSB: med >= SSB_THRESHOLD ? round1(med) : null,
+    },
+  };
+}
+
+function computeRegionBand(data, fromRegionKey, toRegionKey, bandLabel) {
+  // Returns { snr, modes, hasData, rbnCount, ftxCount, modeQuality }
+  const band = BANDS.find(b => b.label === bandLabel);
+  if (!band || !data) {
+    return {
+      snr: 0, modes: new Set(), hasData: false, rbnCount: 0, ftxCount: 0, modeQuality: emptyModeQuality(),
+    };
+  }
+
+  const samples = [];
+  const modes = new Set();
+  const modeSamples = { CW: [], RTTY: [], FT8: [], FT4: [] };
   for (const [spotCall, spot] of Object.entries(data)) {
     const freq = parseFloat(String(spot.freq||'').replace(/\s/g,''));
     if (freq < band.min || freq > band.max) continue;
@@ -272,22 +429,28 @@ function computeRegionBand(data, fromRegionKey, toRegionKey, bandLabel) {
       if (!isNaN(snr)) {
         samples.push(snr);
         const m = normMode(spot.mode);
-        if (m) modes.add(m);
+        if (m) {
+          modes.add(m);
+          if (modeSamples[m]) modeSamples[m].push(snr);
+        }
       }
     }
   }
-  if (!samples.length) return { snr: 0, modes, hasData: false };
-  const median = samples.sort((a,b)=>a-b)[Math.floor(samples.length/2)];
-  if (median >= SSB_THRESHOLD) modes.add('SSB');
-  return { snr: median, modes, hasData: true };
+  return finalizeRbnResult(samples, modes, modeSamples);
 }
 
 function computeGridBand(data, gridStr, radiusMiles, toRegionKey, bandLabel) {
   const band = BANDS.find(b => b.label === bandLabel);
   const gridLL = gridToLatLon(gridStr);
-  if (!band || !data || !gridLL) return { snr: 0, modes: new Set(), hasData: false };
+  if (!band || !data || !gridLL) {
+    return {
+      snr: 0, modes: new Set(), hasData: false, rbnCount: 0, ftxCount: 0, modeQuality: emptyModeQuality(),
+    };
+  }
 
-  const samples = [], modes = new Set();
+  const samples = [];
+  const modes = new Set();
+  const modeSamples = { CW: [], RTTY: [], FT8: [], FT4: [] };
   for (const [spotCall, spot] of Object.entries(data)) {
     const freq = parseFloat(String(spot.freq||'').replace(/\s/g,''));
     if (freq < band.min || freq > band.max) continue;
@@ -303,14 +466,86 @@ function computeGridBand(data, gridStr, radiusMiles, toRegionKey, bandLabel) {
       if (!isNaN(snr)) {
         samples.push(snr);
         const m = normMode(spot.mode);
-        if (m) modes.add(m);
+        if (m) {
+          modes.add(m);
+          if (modeSamples[m]) modeSamples[m].push(snr);
+        }
       }
     }
   }
-  if (!samples.length) return { snr: 0, modes, hasData: false };
-  const median = samples.sort((a,b)=>a-b)[Math.floor(samples.length/2)];
-  if (median >= SSB_THRESHOLD) modes.add('SSB');
-  return { snr: median, modes, hasData: true };
+  return finalizeRbnResult(samples, modes, modeSamples);
+}
+
+function pskEntryForQuery(pskSnapshot, queryCtx, bandLabel) {
+  const byRegion = pskSnapshot && typeof pskSnapshot.byRegion === 'object'
+    ? pskSnapshot.byRegion
+    : null;
+  if (!byRegion || !queryCtx?.toKey) return null;
+  if (queryCtx.mode === 'region') {
+    if (!queryCtx.fromKey) return null;
+    return byRegion[queryCtx.fromKey]?.[queryCtx.toKey]?.[bandLabel] || null;
+  }
+  if (queryCtx.mode === 'grid') {
+    const gridLL = queryCtx.gridLL;
+    if (!gridLL) return null;
+    const fromKey = regionFromLatLon(gridLL.lat, gridLL.lon);
+    if (!fromKey) return null;
+    return byRegion[fromKey]?.[queryCtx.toKey]?.[bandLabel] || null;
+  }
+  return null;
+}
+
+function pskCountWithinGridRadius(entry, gridLL, radiusMiles) {
+  if (!entry || !gridLL) return 0;
+  if (!Array.isArray(entry.rxGridCounts)) return Number(entry.count || 0);
+  let count = 0;
+  const seen = new Set();
+  for (const row of entry.rxGridCounts) {
+    if (!Array.isArray(row) || row.length < 2) continue;
+    const cell = String(row[0] || '').toUpperCase().slice(0, 4);
+    const n = Number(row[1] || 0);
+    if (cell.length < 4 || !Number.isFinite(n) || n <= 0 || seen.has(cell)) continue;
+    const ll = gridToLatLon(cell);
+    if (!ll) continue;
+    const d = distanceMiles(gridLL.lat, gridLL.lon, ll.lat, ll.lon);
+    if (d <= radiusMiles) {
+      count += n;
+      seen.add(cell);
+    }
+  }
+  return count;
+}
+
+function mergePskIntoResult(baseResult, pskEntry, queryCtx) {
+  const out = {
+    ...baseResult,
+    modes: new Set(baseResult?.modes || []),
+    modeQuality: { ...emptyModeQuality(), ...(baseResult?.modeQuality || {}) },
+    rbnCount: Number(baseResult?.rbnCount || 0),
+    ftxCount: Number(baseResult?.ftxCount || 0),
+  };
+  if (!pskEntry || typeof pskEntry.snr !== 'number') return out;
+
+  const pskScaled = ftxSnrToRbnScale(pskEntry.snr);
+  out.modeQuality.FTx = round1(pskEntry.snr);
+  out.modes.add('FT8');
+  out.modes.add('FT4');
+
+  if (queryCtx?.mode === 'grid' && queryCtx.gridLL) {
+    out.ftxCount = pskCountWithinGridRadius(pskEntry, queryCtx.gridLL, Number(queryCtx.radiusMiles || 0));
+  } else {
+    out.ftxCount = Number(pskEntry.count || 0);
+  }
+
+  if (pskScaled != null) {
+    if (!out.hasData) {
+      out.snr = round1(pskScaled);
+      out.hasData = true;
+    } else {
+      out.snr = round1(out.snr * 0.85 + pskScaled * 0.15);
+    }
+  }
+  return out;
 }
 
 // ── PNG rendering ─────────────────────────────────────────────────────────────
@@ -368,7 +603,10 @@ function segColor(i, bright, t) {
 //   [S-meter bar]
 //   [S-unit label right, attribution bottom-right]
 function renderBadge(params) {
-  const { snr, modes, hasData, fromLabel, toLabel, bandLabel, theme, size, dataAge } = params;
+  const {
+    snr, modes, hasData, modeQuality, rbnCount, ftxCount,
+    fromLabel, toLabel, bandLabel, theme, size, dataAge,
+  } = params;
   const t = THEMES[theme] || THEMES.dark;
 
   const small = size === 'small';
@@ -377,7 +615,10 @@ function renderBadge(params) {
   const canvas = createCanvas(W, H);
   const ctx    = canvas.getContext('2d');
 
-  drawBadgePanel(ctx, { snr, modes, hasData, fromLabel, toLabel, bandLabel, dataAge, t, small, W, H, x: 0, y: 0 });
+  drawBadgePanel(ctx, {
+    snr, modes, hasData, modeQuality, rbnCount, ftxCount,
+    fromLabel, toLabel, bandLabel, dataAge, t, small, W, H, x: 0, y: 0,
+  });
   return canvas.toBuffer('image/png');
 }
 
@@ -403,9 +644,12 @@ function renderAllBandsBadge(params) {
     const row = Math.floor(i / COLS);
     const x   = col * CW;
     const y   = row * CH;
-    const r   = allResults[i] || { snr: 0, modes: new Set(), hasData: false };
+    const r   = allResults[i] || {
+      snr: 0, modes: new Set(), hasData: false, modeQuality: emptyModeQuality(), rbnCount: 0, ftxCount: 0,
+    };
     drawBadgePanel(ctx, {
-      snr: r.snr, modes: r.modes, hasData: r.hasData,
+      snr: r.snr, modes: r.modes, hasData: r.hasData, modeQuality: r.modeQuality,
+      rbnCount: r.rbnCount, ftxCount: r.ftxCount,
       fromLabel, toLabel, bandLabel: band.label,
       dataAge, t, small: true, W: CW, H: CH, x, y,
     });
@@ -420,14 +664,15 @@ function renderAllBandsBadge(params) {
 }
 
 // ── Core panel renderer — draws one badge cell at position (x, y) ─────────────
-function drawBadgePanel(ctx, { snr, modes, hasData, fromLabel, toLabel, bandLabel, dataAge, t, small, W, H, x, y }) {
+function drawBadgePanel(ctx, {
+  snr, modes, hasData, modeQuality, rbnCount, ftxCount,
+  fromLabel, toLabel, bandLabel, dataAge, t, small, W, H, x, y,
+}) {
   const PAD    = small ? 5  : 8;
   const titleH = small ? 13 : 18;  // height of title bar
   const modeH  = small ? 11 : 13;  // height of mode badge row
   const barH   = small ? 12 : 16;  // S-meter bar height
   const gap    = small ? 2  : 3;   // gap between elements
-  const attrH  = small ? 9  : 10;  // attribution line height
-
   // Background
   ctx.fillStyle = t.bg;
   ctx.fillRect(x, y, W, H);
@@ -451,7 +696,7 @@ function drawBadgePanel(ctx, { snr, modes, hasData, fromLabel, toLabel, bandLabe
 
   // ── Mode badges row (above S-meter) ───────────────────────────────────────
   const modeY = y + titleH + gap + 1;
-  drawModeBadges(ctx, x + PAD, modeY, W - PAD * 2, modeH, modes, hasData, t, small);
+  drawModeBadges(ctx, x + PAD, modeY, W - PAD * 2, modeH, modes, hasData, modeQuality, t, small);
 
   // ── S-meter bar ───────────────────────────────────────────────────────────
   const barY = modeY + modeH + gap;
@@ -476,12 +721,38 @@ function drawBadgePanel(ctx, { snr, modes, hasData, fromLabel, toLabel, bandLabe
 
 // ── Mode badges row — same colour scheme as the PWA ───────────────────────────
 // Order: CW, SSB, RY, FTx  (matches DISPLAY_MODES in app.js)
-function drawModeBadges(ctx, x, y, w, h, modes, hasData, t, small) {
+function drawModeMiniMeter(ctx, x, y, w, h, fraction, t) {
+  const f = Math.max(0, Math.min(Number(fraction) || 0, 1));
+  const segGap = 1;
+  const segCount = 4;
+  const segW = (w - segGap * (segCount - 1)) / segCount;
+  const track = [
+    'rgba(0, 210, 80, 0.22)',
+    'rgba(230, 200, 0, 0.22)',
+    'rgba(255, 140, 0, 0.22)',
+    'rgba(220, 30, 30, 0.22)',
+  ];
+  const live = [t.green, t.yellow, t.orange, t.red];
+  for (let i = 0; i < segCount; i++) {
+    const sx = x + i * (segW + segGap);
+    const segStart = i / segCount;
+    const segEnd = (i + 1) / segCount;
+    const segFill = Math.max(0, Math.min((f - segStart) / (segEnd - segStart), 1));
+    ctx.fillStyle = track[i];
+    ctx.fillRect(sx, y, segW, h);
+    if (segFill > 0) {
+      ctx.fillStyle = live[i];
+      ctx.fillRect(sx, y, segW * segFill, h);
+    }
+  }
+}
+
+function drawModeBadges(ctx, x, y, w, h, modes, hasData, modeQuality, t, small) {
   const slots = [
-    { label: 'CW',  sources: ['CW'],         isSSB: false },
-    { label: 'SSB', sources: ['SSB'],         isSSB: true  },
-    { label: 'RY',  sources: ['RTTY'],        isSSB: false },
-    { label: 'FTx', sources: ['FT8', 'FT4'],  isSSB: false },
+    { label: 'CW',  sources: ['CW'],         isSSB: false, metric: 'CW'   },
+    { label: 'SSB', sources: ['SSB'],        isSSB: true,  metric: 'SSB'  },
+    { label: 'RY',  sources: ['RTTY'],       isSSB: false, metric: 'RTTY' },
+    { label: 'FTx', sources: ['FT8', 'FT4'], isSSB: false, metric: 'FTx'  },
   ];
 
   const badgeW = small ? 28 : 40;
@@ -493,7 +764,7 @@ function drawModeBadges(ctx, x, y, w, h, modes, hasData, t, small) {
   ctx.font         = `bold ${small ? 7 : 9}px "DejaVu Sans Mono"`;
   ctx.textBaseline = 'middle';
 
-  slots.forEach(({ label, sources, isSSB }) => {
+  slots.forEach(({ label, sources, isSSB, metric }) => {
     const active = hasData && sources.some(s => modes.has(s));
 
     let bg, border, fg;
@@ -518,6 +789,15 @@ function drawModeBadges(ctx, x, y, w, h, modes, hasData, t, small) {
     if (bg !== 'transparent') {
       ctx.fillStyle = bg;
       ctx.fillRect(bx, y, badgeW, badgeH);
+    }
+
+    // 2px mini S-meter strip across top of each mode badge.
+    const qSnr = modeQuality && Object.prototype.hasOwnProperty.call(modeQuality, metric)
+      ? modeQuality[metric]
+      : null;
+    if (hasData && qSnr != null && !Number.isNaN(Number(qSnr))) {
+      const frac = qualityFractionForMode(metric === 'RTTY' ? 'RTTY' : metric, Number(qSnr));
+      drawModeMiniMeter(ctx, bx + 1, y + 1, badgeW - 2, small ? 2 : 3, frac, t);
     }
 
     // Badge border
@@ -610,7 +890,11 @@ const server = http.createServer(async (req, res) => {
   // Health check
   if (pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', rbnAge: Math.round((Date.now()-rbnFetchedAt)/1000) }));
+    res.end(JSON.stringify({
+      status: 'ok',
+      rbnAge: Math.round((Date.now() - rbnFetchedAt) / 1000),
+      pskAge: pskFetchedAt ? Math.round((Date.now() - pskFetchedAt) / 1000) : null,
+    }));
     return;
   }
 
@@ -675,8 +959,9 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Get RBN data
+  // Get RBN + PSK data snapshots
   const data = await getRbnData();
+  const pskSnapshot = await getPskData();
 
   if (!data) {
     const png = renderWarmup(theme, size);
@@ -686,6 +971,16 @@ const server = http.createServer(async (req, res) => {
 
   const dataAge = Math.round((now - rbnFetchedAt) / 1000);
 
+  const queryCtx = isRegionPath
+    ? { mode: 'region', fromKey, toKey }
+    : {
+      mode: 'grid',
+      toKey,
+      grid: (q.grid || '').toUpperCase(),
+      gridLL: gridToLatLon((q.grid || '').toUpperCase()),
+      radiusMiles: parseInt(q.radius) || 500,
+    };
+
   // ── All-bands path ─────────────────────────────────────────────────────────
   if (isAllBands) {
     const fromLabel = isRegionPath
@@ -693,31 +988,31 @@ const server = http.createServer(async (req, res) => {
       : `Grid ${q.grid?.toUpperCase()}`;
     const toLabel = REGIONS.find(r => r.key === toKey)?.label || toKey;
 
-    const allResults = BANDS.map(b => {
-      if (isRegionPath) {
-        return computeRegionBand(data, fromKey, toKey, b.label);
-      } else {
-        const grid   = (q.grid || '').toUpperCase();
-        const radius = parseInt(q.radius) || 500;
-        return computeGridBand(data, grid, radius, toKey, b.label);
-      }
+    const allResults = BANDS.map((b) => {
+      const baseResult = isRegionPath
+        ? computeRegionBand(data, fromKey, toKey, b.label)
+        : computeGridBand(data, queryCtx.grid, queryCtx.radiusMiles, toKey, b.label);
+      const pskEntry = pskEntryForQuery(pskSnapshot, queryCtx, b.label);
+      return mergePskIntoResult(baseResult, pskEntry, queryCtx);
     });
 
     const png = renderAllBandsBadge({ allResults, fromLabel, toLabel, theme, dataAge });
     pngCache.set(cacheKey, { png, createdAt: now });
-    sendPng(res, png, 0, false);
+    const totals = allResults.reduce((acc, r) => {
+      acc.rbn += Number(r?.rbnCount || 0);
+      acc.ftx += Number(r?.ftxCount || 0);
+      return acc;
+    }, { rbn: 0, ftx: 0 });
+    sendPng(res, png, 0, false, { rbnCount: totals.rbn, ftxCount: totals.ftx, pskUsed: !!pskSnapshot });
     return;
   }
 
   // ── Single-band path ───────────────────────────────────────────────────────
-  let result;
-  if (isRegionPath) {
-    result = computeRegionBand(data, fromKey, toKey, band);
-  } else {
-    const grid   = (q.grid || '').toUpperCase();
-    const radius = parseInt(q.radius) || 500;
-    result = computeGridBand(data, grid, radius, toKey, band);
-  }
+  const baseResult = isRegionPath
+    ? computeRegionBand(data, fromKey, toKey, band)
+    : computeGridBand(data, queryCtx.grid, queryCtx.radiusMiles, toKey, band);
+  const pskEntry = pskEntryForQuery(pskSnapshot, queryCtx, band);
+  const result = mergePskIntoResult(baseResult, pskEntry, queryCtx);
 
   // Get display labels
   const fromLabel = isRegionPath
@@ -730,6 +1025,9 @@ const server = http.createServer(async (req, res) => {
     snr: result.snr,
     modes: result.modes,
     hasData: result.hasData,
+    modeQuality: result.modeQuality,
+    rbnCount: result.rbnCount,
+    ftxCount: result.ftxCount,
     fromLabel,
     toLabel,
     bandLabel: band,
@@ -739,10 +1037,14 @@ const server = http.createServer(async (req, res) => {
   });
 
   pngCache.set(cacheKey, { png, createdAt: now });
-  sendPng(res, png, 0, false);
+  sendPng(res, png, 0, false, {
+    rbnCount: result.rbnCount,
+    ftxCount: result.ftxCount,
+    pskUsed: !!pskEntry,
+  });
 });
 
-function sendPng(res, png, ageMs, warming) {
+function sendPng(res, png, ageMs, warming, extra = {}) {
   res.writeHead(200, {
     'Content-Type':              'image/png',
     'Content-Length':            png.length,
@@ -750,6 +1052,9 @@ function sendPng(res, png, ageMs, warming) {
     'Access-Control-Allow-Origin': '*',
     'X-HFSIGNALS-Status':        warming ? 'warming' : 'live',
     'X-HFSIGNALS-Cache-Age':     Math.round(ageMs / 1000),
+    'X-HFSIGNALS-RBN-Count':     Number(extra.rbnCount || 0),
+    'X-HFSIGNALS-FTx-Count':     Number(extra.ftxCount || 0),
+    'X-HFSIGNALS-PSK':           extra.pskUsed ? '1' : '0',
   });
   res.end(png);
 }
@@ -758,6 +1063,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`hfsignals badge API listening on 0.0.0.0:${PORT}`);
   // Pre-fetch data on startup
   getRbnData().then(() => console.log('Initial RBN data fetched.'));
+  getPskData().then(() => console.log('Initial PSK data fetched.'));
 });
 
 process.on('SIGTERM', () => server.close(() => process.exit(0)));
