@@ -1172,3 +1172,73 @@ body::after {
 .meters-scroll::-webkit-scrollbar-track { background: var(--bg); }
 .meters-scroll::-webkit-scrollbar-thumb { background: var(--accent2); border-radius: 2px; }
 
+
+/* ── Signal History Chart ──────────────────────────────────────────────────── */
+.history-panel {
+  margin-top: 10px;
+  border: 1px solid rgba(0,212,170,0.25);
+  border-radius: 4px;
+  background: rgba(13,13,26,0.45);
+  padding: 8px 10px 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.history-title {
+  font-family: 'Orbitron', monospace;
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  color: var(--accent);
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+.history-to-select {
+  font-size: 11px;
+  padding: 2px 5px;
+  height: 22px;
+  min-width: 0;
+  flex: 1 1 auto;
+  max-width: 160px;
+}
+
+.history-svg {
+  display: block;
+  width: 100%;
+  height: 160px;
+  overflow: visible;
+}
+
+.history-note {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-align: center;
+  margin-top: 3px;
+  min-height: 13px;
+  letter-spacing: 0.02em;
+}
+
+/* Chart element styles (applied via SVG attributes but theme-aware via CSS vars) */
+.history-axis-line  { stroke: var(--text-dim); stroke-width: 1; }
+.history-tick-label { fill: var(--text-dim); font-size: 9px; font-family: 'Share Tech Mono', monospace; }
+.history-grid-line  { stroke: var(--text-dim); stroke-width: 0.5; stroke-dasharray: 2 4; opacity: 0.4; }
+.history-legend-text { fill: var(--text); font-size: 9px; font-family: 'Share Tech Mono', monospace; }
+
+/* Vantage display: force column layout so chart sits below audio button */
+.vantage-display {
+  justify-content: flex-start;
+}
+
+@media (max-width: 599px) {
+  .history-svg { height: 130px; }
+  .history-to-select { max-width: 120px; }
+}

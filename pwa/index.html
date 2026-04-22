@@ -128,6 +128,26 @@
         </button>
         <audio id="vantage-audio-player" preload="none"></audio>
       </div>
+
+      <!-- ── Signal History Chart ── -->
+      <div class="history-panel" id="history-panel">
+        <div class="history-header">
+          <span class="history-title">24h Signal History</span>
+          <select id="history-to-select" class="history-to-select ctrl-select">
+            <option value="ENA">E. North America</option>
+            <option value="CNA">C. North America</option>
+            <option value="WNA">W. North America</option>
+            <option value="CAR">Caribbean</option>
+            <option value="SA">South America</option>
+            <option value="EU" selected>Europe</option>
+            <option value="AF">Africa</option>
+            <option value="AS">Asia</option>
+            <option value="OC">Oceania</option>
+          </select>
+        </div>
+        <svg id="history-svg" class="history-svg" xmlns="http://www.w3.org/2000/svg" aria-label="24-hour SNR history chart"></svg>
+        <div class="history-note" id="history-note"></div>
+      </div>
     </div>
 
     <div class="meters-scroll">

@@ -1,6 +1,7 @@
 'use strict';
 
 const http  = require('http');
+const Database  = require('better-sqlite3');
 const https = require('https');
 const url   = require('url');
 const fs    = require('fs');
@@ -174,6 +175,163 @@ const REGION_NAME_BY_KEY = {
 };
 const BAND_LABELS = BANDS.map((b) => b.label);
 const BAND_LABEL_SET = new Set(BAND_LABELS);
+
+// ── Signal history DB ─────────────────────────────────────────────────────────
+const HISTORY_DB_PATH  = process.env.HISTORY_DB_PATH || '/data/history.db';
+const HISTORY_SNAPSHOT_MS = 5 * 60 * 1000;   // 5-minute snapshot cadence
+const HISTORY_KEEP_MS     = 24 * 60 * 60 * 1000; // 24-hour retention
+
+let histDb = null;
+let histInsert = null;
+
+function initHistoryDb() {
+  try {
+    const dir = require('path').dirname(HISTORY_DB_PATH);
+    require('fs').mkdirSync(dir, { recursive: true });
+    histDb = new Database(HISTORY_DB_PATH);
+    histDb.pragma('journal_mode = WAL');
+    histDb.pragma('synchronous = NORMAL');
+    histDb.exec(`
+      CREATE TABLE IF NOT EXISTS band_snr (
+        ts         INTEGER NOT NULL,
+        from_rgn   TEXT    NOT NULL,
+        to_rgn     TEXT    NOT NULL,
+        band       TEXT    NOT NULL,
+        snr        REAL    NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_band_snr_from_ts
+        ON band_snr(from_rgn, ts);
+    `);
+    histInsert = histDb.prepare(
+      'INSERT INTO band_snr(ts, from_rgn, to_rgn, band, snr) VALUES (?,?,?,?,?)'
+    );
+    console.log('[history] DB ready:', HISTORY_DB_PATH);
+  } catch (e) {
+    console.warn('[history] DB init failed:', e.message);
+    histDb = null;
+  }
+}
+
+function pruneHistory() {
+  if (!histDb) return;
+  try {
+    const cutoff = Math.floor((Date.now() - HISTORY_KEEP_MS) / 1000);
+    const r = histDb.prepare('DELETE FROM band_snr WHERE ts < ?').run(cutoff);
+    if (r.changes > 0) console.log('[history] pruned', r.changes, 'rows');
+  } catch (e) {
+    console.warn('[history] prune error:', e.message);
+  }
+}
+
+function snapshotHistory() {
+  if (!histDb || !histInsert) return;
+  const ts = Math.floor(Date.now() / 1000);
+  const spotAgeCutoff = Date.now() - 120_000;
+
+  // For every from->to region pair, collect RBN SNR values per band
+  // then merge with PSK data exactly as finalizeBandResults does.
+  try {
+    const insertMany = histDb.transaction((rows) => {
+      for (const r of rows) histInsert.run(r.ts, r.from, r.to, r.band, r.snr);
+    });
+
+    const rows = [];
+    for (const fromRegion of REGION_KEYS) {
+      // Gather RBN spots from this fromRegion
+      const rbnByToRegion = {}; // toRegion -> band -> [snr]
+      for (const [, spot] of spotMap) {
+        if (spot.lastSeen < spotAgeCutoff) continue;
+        const band = bandForFrequencyKhz(spot.freq);
+        if (!band) continue;
+        const toRegion = classifyCallsignRegion(spot.dxCall);
+        if (!toRegion) continue;
+        for (const [spotter, snrVal] of Object.entries(spot.lsn || {})) {
+          if (classifyCallsignRegion(spotter) !== fromRegion) continue;
+          const snr = Number(snrVal);
+          if (!Number.isFinite(snr)) continue;
+          rbnByToRegion[toRegion] ??= {};
+          rbnByToRegion[toRegion][band] ??= [];
+          rbnByToRegion[toRegion][band].push(snr);
+        }
+      }
+
+      for (const toRegion of REGION_KEYS) {
+        const bandRbn = rbnByToRegion[toRegion] || {};
+        for (const { label: band } of BANDS) {
+          const rbnVals = bandRbn[band] || [];
+          const rbnSnr  = median(rbnVals);
+          // Merge PSK
+          const pskEntry = pskCacheData?.[fromRegion]?.[toRegion]?.[band];
+          const ftxSnr   = (pskEntry && Number.isFinite(pskEntry.snr)) ? pskEntry.snr : null;
+          const ftxScaled = ftxSnrToRbnScale(ftxSnr);
+
+          let combined = null;
+          if (Number.isFinite(rbnSnr) && Number.isFinite(ftxScaled))
+            combined = rbnSnr * 0.85 + ftxScaled * 0.15;
+          else if (Number.isFinite(rbnSnr))  combined = rbnSnr;
+          else if (Number.isFinite(ftxScaled)) combined = ftxScaled;
+
+          if (!Number.isFinite(combined)) continue;
+          const snr = Math.max(0, Math.round(combined * 10) / 10);
+          rows.push({ ts, from: fromRegion, to: toRegion, band, snr });
+        }
+      }
+    }
+    if (rows.length > 0) insertMany(rows);
+    // Prune every snapshot (cheap with WAL)
+    pruneHistory();
+  } catch (e) {
+    console.warn('[history] snapshot error:', e.message);
+  }
+}
+
+function serveHistory(res, query) {
+  if (!histDb) {
+    sendJson(res, 503, { error: 'history_unavailable' });
+    return;
+  }
+  const fromRgn = (query.from || 'ENA').toUpperCase();
+  const toRgn   = (query.to   || '').toUpperCase();
+
+  if (!REGION_KEY_SET.has(fromRgn)) {
+    sendJson(res, 400, { error: 'bad_from_region' });
+    return;
+  }
+
+  const cutoff = Math.floor((Date.now() - HISTORY_KEEP_MS) / 1000);
+  let rows;
+  try {
+    if (toRgn && REGION_KEY_SET.has(toRgn)) {
+      rows = histDb.prepare(
+        'SELECT ts, to_rgn, band, snr FROM band_snr WHERE from_rgn=? AND to_rgn=? AND ts>=? ORDER BY ts ASC'
+      ).all(fromRgn, toRgn, cutoff);
+    } else {
+      // Return all to-regions when none specified
+      rows = histDb.prepare(
+        'SELECT ts, to_rgn, band, snr FROM band_snr WHERE from_rgn=? AND ts>=? ORDER BY ts ASC'
+      ).all(fromRgn, cutoff);
+    }
+  } catch (e) {
+    sendJson(res, 500, { error: 'db_query_error', message: e.message });
+    return;
+  }
+
+  // Find earliest timestamp in DB for this from region (for "collecting since" UI hint)
+  let earliest = null;
+  try {
+    const r = histDb.prepare('SELECT MIN(ts) as mn FROM band_snr WHERE from_rgn=?').get(fromRgn);
+    if (r && r.mn) earliest = r.mn;
+  } catch {}
+
+  sendJson(res, 200, {
+    from: fromRgn,
+    to: toRgn || 'all',
+    bands: BAND_LABELS,
+    earliest,
+    points: rows
+  });
+}
+
 const REGION_KEY_SET = new Set(REGION_KEYS);
 
 const hamdbAudioCache = new Map();
@@ -1926,6 +2084,10 @@ const server = http.createServer(async (req, res) => {
     }));
     return;
   }
+  if (parts[0] === 'history') {
+    serveHistory(res, parsed.query || {});
+    return;
+  }
   send(res, 404, 'text/plain', 'Not found');
 });
 
@@ -1967,6 +2129,12 @@ ensureAudioCacheDir().then(() => ensureWaitingAudio()).catch(() => {});
 
 // Pre-generate static outro in background at startup
 ensureAudioCacheDir().then(() => ensureOutroAudio()).catch(() => {});
+
+// ── History DB startup ───────────────────────────────────────────────────────
+initHistoryDb();
+setInterval(snapshotHistory, HISTORY_SNAPSHOT_MS);
+// Take an initial snapshot after 60s (proxy may not have data yet at startup)
+setTimeout(snapshotHistory, 60_000);
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`RBN proxy listening on 0.0.0.0:${PORT}`);

@@ -1,18 +1,24 @@
 FROM node:22-alpine
 
-# Install nginx, certbot, supervisor, curl
+# Install nginx, certbot, supervisor, curl + native build tools for better-sqlite3
 RUN apk add --no-cache \
     nginx \
     certbot \
     certbot-nginx \
     supervisor \
     curl \
-    openssl
+    openssl \
+    python3 \
+    make \
+    g++
 
 # ── Node proxy ────────────────────────────────────────────────────────────────
 WORKDIR /app/proxy
 COPY proxy/proxy.js .
-RUN npm install ws
+RUN npm install ws better-sqlite3
+
+# ── Data directory for history DB ─────────────────────────────────────────────
+RUN mkdir -p /data
 
 # ── PWA static files ──────────────────────────────────────────────────────────
 COPY pwa/ /usr/share/nginx/html/

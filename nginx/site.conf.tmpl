@@ -78,6 +78,14 @@ server {
         proxy_connect_timeout 5s;
     }
 
+    location /history {
+        proxy_pass         http://127.0.0.1:3001/history;
+        proxy_http_version 1.1;
+        proxy_read_timeout 10s;
+        proxy_connect_timeout 5s;
+        add_header Cache-Control "no-cache";
+    }
+
     # ── Badge image API ──────────────────────────────────────────────────────
     location /badge/ {
         proxy_pass         http://rbn-badge:3002/badge/;

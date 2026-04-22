@@ -18,6 +18,7 @@ services:
     volumes:
       - certs:/etc/letsencrypt
       - certbot-www:/var/www/certbot
+      - history-data:/data
     networks:
       - rbn-net
     depends_on:
@@ -39,6 +40,7 @@ services:
 volumes:
   certs:
   certbot-www:
+  history-data:
 
 networks:
   rbn-net:
