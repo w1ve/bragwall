@@ -601,7 +601,7 @@ h1 {
 }
 
 .region-panel.collapsed {
-  width: 132px;
+  width: 86px;
 }
 
 .desk-summary {
@@ -633,17 +633,20 @@ h1 {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 3px;
-  padding: 5px;
+  gap: 2px;
+  padding: 4px 3px 4px;
 }
 
 .region-panel.collapsed .desk-pill {
   width: 100%;
   text-align: center;
-  padding: 2px 3px;
-  font-size: 12px;
+  padding: 2px 2px;
+  font-size: 11px;
+  font-weight: 700;
   white-space: normal;
-  line-height: 1.15;
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+  letter-spacing: 0.02em;
 }
 
 .region-panel.collapsed .band-rows,
@@ -653,6 +656,29 @@ h1 {
 
 .region-panel.collapsed .region-header {
   border-bottom: 1px solid rgba(0,212,170,0.12);
+  padding: 4px 2px 3px;
+  justify-content: center;
+  align-items: center;
+  min-height: 31px;
+  position: relative;
+}
+
+.region-panel.collapsed .region-header-name {
+  text-align: center;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.02;
+  font-size: 14px;
+  letter-spacing: 0.07em;
+  font-weight: 800;
+}
+
+.region-panel.collapsed .region-header-chevron {
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  font-size: 8px;
 }
 
 .band-rows {

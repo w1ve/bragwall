@@ -12,6 +12,16 @@ const REGIONS = [
   'Oceania',
 ];
 const REGION_KEYS = ['ENA', 'CNA', 'WNA', 'SA', 'EU', 'AF', 'AS', 'OC'];
+const DESKTOP_REGION_TITLES = [
+  'Eastern North America',
+  'Central North America',
+  'Western North America',
+  'South America',
+  'Europe',
+  'Africa',
+  'Asia',
+  'Oceania',
+];
 
 const BANDS = [
   { label: '160m', min: 1800,  max: 2000  },
@@ -1154,6 +1164,7 @@ const footers      = []; // [regionIdx]
 const deskModeRows = []; // [regionIdx][bandIdx]
 const deskPanels   = []; // [regionIdx]
 const deskHeaders  = []; // [regionIdx]
+const deskHeaderNames = []; // [regionIdx]
 const deskPills    = []; // [regionIdx][bandIdx]
 
 // Phone refs
@@ -1185,8 +1196,14 @@ function setDesktopPanelCollapsed(regionIdx, collapsed, shouldSave = true) {
   desktopCollapsed[regionIdx] = !!collapsed;
   const panel = deskPanels[regionIdx];
   const hdr = deskHeaders[regionIdx];
+  const hdrName = deskHeaderNames[regionIdx];
+  const longName = DESKTOP_REGION_TITLES[regionIdx] || REGIONS[regionIdx] || '';
   if (panel) panel.classList.toggle('collapsed', desktopCollapsed[regionIdx]);
   if (hdr) hdr.setAttribute('aria-expanded', String(!desktopCollapsed[regionIdx]));
+  if (hdrName) {
+    hdrName.textContent = desktopCollapsed[regionIdx] ? (REGION_KEYS[regionIdx] || longName) : longName;
+    hdrName.title = longName;
+  }
   if (shouldSave) saveSettings();
 }
 
@@ -1198,11 +1215,14 @@ function applyDesktopCollapseState() {
 
 function updateSummaryPill(pill, bandIdx, hasData, snr, className) {
   if (!pill) return;
+  const bandFull = BANDS[bandIdx].label;
+  const compactBand = bandFull.endsWith('m') ? bandFull.slice(0, -1) : bandFull;
+  const pillBand = className === 'desk-pill' ? compactBand : bandFull;
   if (hasData) {
-    pill.textContent = `${BANDS[bandIdx].label} ${snrToSUnit(snr)}`;
+    pill.textContent = `${pillBand} ${snrToSUnit(snr)}`;
     pill.className = className;
   } else {
-    pill.textContent = BANDS[bandIdx].label;
+    pill.textContent = pillBand;
     pill.className = `${className} no-data`;
   }
 }
@@ -1212,9 +1232,10 @@ function buildDesktopPanels() {
   const grid = document.getElementById('meters-grid');
   grid.innerHTML = '';
   canvases.length = 0; sUnits.length = 0; footers.length = 0; deskModeRows.length = 0;
-  deskPanels.length = 0; deskHeaders.length = 0; deskPills.length = 0;
+  deskPanels.length = 0; deskHeaders.length = 0; deskHeaderNames.length = 0; deskPills.length = 0;
 
-  REGIONS.forEach((name, ri) => {
+  REGIONS.forEach((_, ri) => {
+    const title = DESKTOP_REGION_TITLES[ri] || REGIONS[ri];
     const panel = document.createElement('div');
     panel.className = 'region-panel';
 
@@ -1224,7 +1245,8 @@ function buildDesktopPanels() {
     hdr.setAttribute('tabindex', '0');
     const hdrName = document.createElement('span');
     hdrName.className = 'region-header-name';
-    hdrName.textContent = name;
+    hdrName.textContent = title;
+    hdrName.title = title;
     const hdrChevron = document.createElement('span');
     hdrChevron.className = 'region-header-chevron';
     hdrChevron.textContent = '▼';
@@ -1295,6 +1317,7 @@ function buildDesktopPanels() {
     deskModeRows.push(rmDesk);
     deskPanels.push(panel);
     deskHeaders.push(hdr);
+    deskHeaderNames.push(hdrName);
     deskPills.push(rp);
 
     const toggleCollapse = () => setDesktopPanelCollapsed(ri, !desktopCollapsed[ri]);
