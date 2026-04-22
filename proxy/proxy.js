@@ -1405,24 +1405,22 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
       lines.push(`Strongest signal ${spokenSnr(regionBestSnr)} on ${bandLabelSpoken(regionBestBand)}.`);
     }
 
-    // "Signal to Noise Ratios on the bands: 80 meters plus 18, 40 meters plus 24, ..."
-    // Band label ("80 meters") prevents TTS from misreading "160, plus 18" as "1600 plus 18"
-    const snrParts = activeBands.map(b => snrEntry(b, bandData[b].snr));
-    lines.push(`Signal to Noise Ratios on the bands: ${snrParts.join(', ')}.`);
-
-    // Modes — union across all active bands for this region
-    const modeset = new Set();
+    // Per-band SNR + inline modes
+    // e.g. "Signal to Noise Ratios on the bands: 80 meters plus 18, CW active.
+    //        40 meters plus 24, CW and Digital active. 20 meters plus 28, CW, Digital, and SSB active."
+    lines.push('Signal to Noise Ratios on the bands:');
     for (const band of activeBands) {
       const b = bandData[band];
-      if (b.modes) for (const m of b.modes) modeset.add(m);
-      if (b.ssbOk) modeset.add('SSB');
+      const snrStr = snrEntry(band, b.snr);
+      // Build mode labels for this specific band
+      const bandModes = [];
+      if (b.modes && b.modes.has('CW'))                              bandModes.push('CW');
+      if (b.modes && (b.modes.has('FT8') || b.modes.has('FT4')))    bandModes.push('Digital');
+      if (b.modes && b.modes.has('RTTY'))                            bandModes.push('RTTY');
+      if (b.ssbOk)                                                   bandModes.push('SSB');
+      const modeStr = bandModes.length ? `, ${oxfordList(bandModes)} active` : '';
+      lines.push(`${snrStr}${modeStr}.`);
     }
-    const modeLabels = [];
-    if (modeset.has('CW'))                         modeLabels.push('CW');
-    if (modeset.has('FT8') || modeset.has('FT4'))  modeLabels.push('Digital');
-    if (modeset.has('RTTY'))                       modeLabels.push('RTTY');
-    if (modeset.has('SSB'))                        modeLabels.push('SSB');
-    if (modeLabels.length) lines.push(`${oxfordList(modeLabels)} active.`);
   }
 
   // ── 5. Silent regions batched (once) ─────────────────────────────────────
