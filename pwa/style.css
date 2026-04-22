@@ -574,6 +574,16 @@ body.theme-cb .vantage-audio-btn.playing {
   color: #d9fff4;
 }
 
+.vantage-place-name {
+  margin-top: 2px;
+  font-size: 13px;
+  color: #7ecfb3;
+  letter-spacing: 0.02em;
+  font-style: italic;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .vantage-map-canvas {
   display: block;
   width: 100%;

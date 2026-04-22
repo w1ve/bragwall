@@ -174,6 +174,8 @@ const BAND_LABEL_SET = new Set(BAND_LABELS);
 const REGION_KEY_SET = new Set(REGION_KEYS);
 
 const hamdbAudioCache = new Map();
+const gridPlaceCache = new Map();     // grid4 → { name, expiresAt }
+const GRID_PLACE_CACHE_MS = 24 * 60 * 60 * 1000; // 24 h
 let asyncVoiceIdCache = ASYNC_VOICE_ID || null;
 let asyncVoiceLookupPromise = null;
 let audioCacheDirReady = false;
@@ -1123,6 +1125,32 @@ function pronounceGrid(grid) {
   }).join(' ');
 }
 
+async function reverseGeoGrid(grid) {
+  const key = grid.toUpperCase().slice(0, 4);
+  const cached = gridPlaceCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.name;
+
+  const ll = gridToLatLon(key);
+  if (!ll) { gridPlaceCache.set(key, { name: null, expiresAt: Date.now() + GRID_PLACE_CACHE_MS }); return null; }
+
+  try {
+    const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?lat=${ll.lat}&lon=${ll.lon}&format=json&zoom=10&addressdetails=1`;
+    const raw = await fetchRaw(nominatimUrl, 8000, { 'User-Agent': 'hfsignals-proxy/1.0 (hfsignals.live)' });
+    const data = JSON.parse(raw);
+    const addr = data?.address || {};
+    // Prefer city/town/village/county; skip if clearly ocean/sea/nothing
+    const place = addr.city || addr.town || addr.village || addr.hamlet
+                || addr.county || addr.state_district || null;
+    const name = place || null;
+    gridPlaceCache.set(key, { name, expiresAt: Date.now() + GRID_PLACE_CACHE_MS });
+    return name;
+  } catch (e) {
+    gridPlaceCache.set(key, { name: null, expiresAt: Date.now() + 30 * 60 * 1000 });
+    return null;
+  }
+}
+
+
 function joinBands(bandList) {
   const spoken = bandList.map(bandLabelSpoken);
   if (spoken.length === 0) return '';
@@ -1216,7 +1244,8 @@ function buildAudioReportText(params, bandResults, solar = {}) {
     const radiusNum = Math.round(params.radius);
     const unitWord = params.unit === 'km' ? 'kilometer' : 'mile';
     const unitPlural = radiusNum === 1 ? unitWord : unitWord + 's';
-    lines.push(`From the vantage point of a ${radiusNum}-${unitPlural} radius around Maidenhead grid ${pronounceGrid(params.grid)}.`);
+    const spokenPlace = params.gridPlaceName ? `, ${params.gridPlaceName},` : '';
+    lines.push(`From the vantage point of a ${radiusNum}-${unitPlural} radius around Maidenhead grid ${pronounceGrid(params.grid)}${spokenPlace}.`);
   } else {
     const regionName = REGION_NAME_BY_KEY[params.fromRegion] || params.fromRegion;
     lines.push(`From the vantage point of ${regionName}.`);
@@ -1488,6 +1517,9 @@ async function serveAudioPropReport(req, res, query = {}) {
 
   await ensureAudioCacheDir();
   await ensurePskForAudio();
+  if (params.mode === 'grid' && params.grid) {
+    params.gridPlaceName = await reverseGeoGrid(params.grid);
+  }
   const regionResults = await collectBandResultsPerRegion(params);
   const solar = await fetchSolarDataForAudio();
   const englishText = buildAudioReportText(params, regionResults, solar);
@@ -1634,6 +1666,15 @@ const server = http.createServer(async (req, res) => {
       } catch {}
     }
     sendJson(res, 200, { tooltip: audioTooltipText(resolvedLang), lang: outputLanguage(resolvedLang) });
+    return;
+  }
+  if (parts[0] === 'gridinfo') {
+    const grid4 = ((parsed.query || {}).grid || '').toUpperCase().slice(0, 4);
+    if (!grid4 || grid4.length < 4) { sendJson(res, 400, { error: 'bad_grid' }); return; }
+    const ll = gridToLatLon(grid4);
+    if (!ll) { sendJson(res, 400, { error: 'invalid_grid' }); return; }
+    const place = await reverseGeoGrid(grid4);
+    sendJson(res, 200, { grid: grid4, lat: ll.lat, lon: ll.lon, place });
     return;
   }
   if (parts[0] === 'audio' && (parts[1] === 'propreport' || parts[1] === 'report')) {

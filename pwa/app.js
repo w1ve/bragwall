@@ -2110,6 +2110,24 @@ function wireAudioControls() {
   btn.addEventListener('click', () => { requestAudioReport(); });
 }
 
+// ── Grid place-name cache (fetched from /gridinfo) ───────────────────────────
+const _gridPlaceCache = {};  // grid4 → placeName | null | 'pending'
+
+async function fetchGridPlaceName(grid4) {
+  const key = grid4.toUpperCase().slice(0, 4);
+  if (key in _gridPlaceCache) return _gridPlaceCache[key];
+  _gridPlaceCache[key] = 'pending';
+  try {
+    const r = await fetch(`/gridinfo?grid=${encodeURIComponent(key)}`);
+    if (!r.ok) throw new Error('http ' + r.status);
+    const d = await r.json();
+    _gridPlaceCache[key] = d.place || null;
+  } catch {
+    _gridPlaceCache[key] = null;
+  }
+  return _gridPlaceCache[key] === 'pending' ? null : _gridPlaceCache[key];
+}
+
 function vantagePointText() {
   const v = currentVantageState();
   if (v.mode === 'grid') {
@@ -2125,6 +2143,33 @@ function updateVantageDisplay() {
   if (!el) return;
   const v = currentVantageState();
   el.textContent = vantagePointText();
+
+  // Update place-name sub-line for grid mode
+  const placeEl = document.getElementById('vantage-place-name');
+  if (placeEl) {
+    if (v.mode === 'grid' && v.grid && v.grid.length >= 4) {
+      const cached = _gridPlaceCache[v.grid.toUpperCase().slice(0, 4)];
+      if (cached && cached !== 'pending') {
+        placeEl.textContent = cached;
+        placeEl.style.display = '';
+      } else if (!cached) {
+        placeEl.textContent = '';
+        placeEl.style.display = 'none';
+        fetchGridPlaceName(v.grid).then(name => {
+          // Only update if grid hasn't changed
+          const cur = currentVantageState();
+          const plEl = document.getElementById('vantage-place-name');
+          if (plEl && cur.mode === 'grid' && cur.grid && cur.grid.toUpperCase().slice(0,4) === v.grid.toUpperCase().slice(0,4)) {
+            plEl.textContent = name || '';
+            plEl.style.display = name ? '' : 'none';
+          }
+        });
+      }
+    } else {
+      placeEl.textContent = '';
+      placeEl.style.display = 'none';
+    }
+  }
   if (canvas) {
     const hasDetailed = Array.isArray(detailedWorldPolygons) && detailedWorldPolygons.length > 0;
     canvas.classList.toggle('loading', !hasDetailed);
