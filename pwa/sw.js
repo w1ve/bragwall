@@ -1,7 +1,8 @@
-const CACHE = 'hfsignals-live-v16';
+const CACHE = 'hfsignals-live-v17';
 const ASSETS = [
   './',
   './index.html',
+  './badge-test.html',
   './style.css',
   './app.js',
   './manifest.json',
