@@ -1194,7 +1194,7 @@ const DISPLAY_MODES = [
   { abbr: 'CW',  sources: ['CW'],        isSSB: false },
   { abbr: 'SSB', sources: ['SSB'],       isSSB: true  },
   { abbr: 'RY',  sources: ['RTTY'],      isSSB: false },
-  { abbr: 'FTx', sources: ['FT8','FT4'], isSSB: false },
+  { abbr: 'DIG', sources: ['FT8','FT4'], isSSB: false },
 ];
 const MODE_QUALITY_KEY = { CW: 'CW', RY: 'RTTY', FTx: 'FTx', SSB: 'SSB' };
 
@@ -1938,14 +1938,14 @@ function updateSkimmerCount(n, isGrid, ftxReports = 0, skimmerCalls = [], ftxCal
   }
 
   if (ftxLabel) {
-    ftxLabel.textContent = `${ftxReports} FTx report${ftxReports === 1 ? '' : 's'}`;
+    ftxLabel.textContent = `${ftxReports} DIG report${ftxReports === 1 ? '' : 's'}`;
     ftxLabel.setAttribute('title', formatTooltipList('FTx calls', ftxCalls));
     ftxLabel.className = `skimmer-count vantage-count-label ${ftxClass}`;
   }
 
   // Backward compatibility / accessibility mirror text.
   if (combinedLabel) {
-    combinedLabel.textContent = `${n} skimmer${n === 1 ? '' : 's'} / ${ftxReports} FTx report${ftxReports === 1 ? '' : 's'}`;
+    combinedLabel.textContent = `${n} skimmer${n === 1 ? '' : 's'} / ${ftxReports} DIG report${ftxReports === 1 ? '' : 's'}`;
     if (!skimmerLabel) {
       combinedLabel.className = `skimmer-count vantage-count-label ${skimmerClass}`;
     }
