@@ -23,6 +23,7 @@ const SSB_SNR_THRESHOLD = parseFloat(process.env.SSB_SNR_THRESHOLD || '20');
 
 const AUDIO_CACHE_MS = parseInt(process.env.AUDIO_CACHE_MS || String(15 * 60 * 1000), 10);
 const AUDIO_CACHE_DIR = process.env.AUDIO_CACHE_DIR || '/tmp/hfsignals-audio-cache';
+const WAITING_AUDIO_PATH = path.join(AUDIO_CACHE_DIR, 'waiting-message.mp3');
 const AUDIO_GRID_LOOKUP_LIMIT = parseInt(process.env.AUDIO_GRID_LOOKUP_LIMIT || '240', 10);
 const AUDIO_HAMDB_CACHE_MS = parseInt(process.env.AUDIO_HAMDB_CACHE_MS || String(24 * 60 * 60 * 1000), 10);
 const AUDIO_HAMDB_NEG_CACHE_MS = parseInt(process.env.AUDIO_HAMDB_NEG_CACHE_MS || String(3 * 60 * 60 * 1000), 10);
@@ -1087,7 +1088,7 @@ function finalizeBandResults(params, bandState) {
       sUnit: hasSignal ? snrToSUnit(combined) : null,
       modes: modes,
       cwRttyFtx: hasSignal && (modes.has('CW') || modes.has('RTTY') || modes.has('FT8') || modes.has('FT4')),
-      ssbOk: !!params.ssb && hasSignal && combined >= SSB_SNR_THRESHOLD,
+      ssbOk: !!params.ssb && hasSignal, // trust client-side threshold check
     };
   }
   return out;
@@ -1163,20 +1164,21 @@ async function reverseGeoGrid(grid) {
     const city = addr.city || addr.town || addr.village || addr.hamlet
               || addr.county || addr.state_district || null;
     const countryLabel = isNorthAmerica ? null : (addr.country || null);
-    return { cc, isNorthAmerica, stateCode, stateFull, city, countryLabel };
+    // For non-NA countries, ignore stateCode so we never display a region code instead of the country name
+    return { cc, isNorthAmerica, stateCode: isNorthAmerica ? stateCode : null, stateFull: isNorthAmerica ? stateFull : null, city, countryLabel };
   }
 
   function buildStrings(p) {
     if (!p) return { display: null, spoken: null };
     let display = null, spoken = null;
     if (p.city) {
-      const suffix = p.stateCode || p.countryLabel;
+      const suffix = p.isNorthAmerica ? (p.stateCode || null) : p.countryLabel;
       display = suffix ? `${p.city}, ${suffix}` : p.city;
       const spokenSuffix = p.isNorthAmerica ? (p.stateFull || p.stateCode) : p.countryLabel;
       spoken = spokenSuffix ? `${p.city}, ${spokenSuffix}` : p.city;
     } else if (p.stateFull) {
-      display = p.isNorthAmerica ? p.stateFull : `${p.stateFull}, ${p.countryLabel || ''}`.trim().replace(/,$/, '');
-      spoken = display;
+      display = p.stateFull;
+      spoken = p.stateFull;
     } else if (p.countryLabel) {
       display = p.countryLabel;
       spoken = p.countryLabel;
@@ -1298,7 +1300,7 @@ function buildAudioReportText(params, bandResults, solar = {}) {
   const now = new Date();
   const utcDateSpoken = `${MONTH_NAMES[now.getUTCMonth()]} ${ORDINALS(now.getUTCDate())}, ${now.getUTCFullYear()}`;
 
-  lines.push(`${greeting}, this is the H F Signals dot live Radio Conditions report for ${utcSpoken} U T C, ${utcDateSpoken}.`);
+  lines.push(`${greeting}, this is a custom H F Signals dot live Radio Conditions report for ${utcSpoken} U T C, ${utcDateSpoken}.`);
 
   // Solar / geomagnetic conditions (omitted if params.includeSolar === false)
   if (params.includeSolar !== false) {
@@ -1578,6 +1580,86 @@ async function collectBandResultsPerRegion(params) {
   return results;
 }
 
+
+// ── Waiting audio (plays immediately while TTS is generating) ─────────────────
+let waitingAudioGenerating = false;
+
+async function ensureWaitingAudio() {
+  if (waitingAudioGenerating) return;
+  try {
+    await fs.promises.access(WAITING_AUDIO_PATH);
+    return; // already exists
+  } catch {}
+  if (!ASYNC_API_KEY) return;
+  waitingAudioGenerating = true;
+  try {
+    await ensureAudioCacheDir();
+    const voiceId = await resolveAsyncVoiceId();
+    const payload = {
+      model_id: ASYNC_MODEL_ID,
+      transcript: 'One moment while we generate your custom report.',
+      voice: { mode: 'id', id: voiceId },
+      output_format: {
+        container: 'mp3',
+        sample_rate: Math.max(8000, Math.min(48000, ASYNC_MP3_SAMPLE_RATE)),
+        bit_rate:    Math.max(32000, Math.min(320000, ASYNC_MP3_BIT_RATE)),
+      },
+    };
+    const targetUrl = `${ASYNC_API_BASE.replace(/\/+$/, '')}/text_to_speech/streaming`;
+    const parsed2 = url.parse(targetUrl);
+    const bodyText = JSON.stringify(payload);
+    const tmpPath = `${WAITING_AUDIO_PATH}.tmp`;
+    const ws2 = fs.createWriteStream(tmpPath);
+    await new Promise((resolve, reject) => {
+      const req2 = https.request({
+        protocol: parsed2.protocol,
+        hostname: parsed2.hostname,
+        port: parsed2.port,
+        path: parsed2.path,
+        method: 'POST',
+        timeout: 30000,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${ASYNC_API_KEY}`,
+          'Content-Length': Buffer.byteLength(bodyText),
+        },
+      }, (upstream) => {
+        if (upstream.statusCode !== 200) {
+          reject(new Error(`async.com waiting audio HTTP ${upstream.statusCode}`));
+          return;
+        }
+        upstream.pipe(ws2);
+        upstream.on('end', resolve);
+        upstream.on('error', reject);
+      });
+      req2.on('error', reject);
+      req2.on('timeout', () => { req2.destroy(); reject(new Error('waiting audio timeout')); });
+      req2.write(bodyText);
+      req2.end();
+    });
+    ws2.end();
+    await new Promise(r => ws2.on('close', r));
+    await fs.promises.rename(tmpPath, WAITING_AUDIO_PATH);
+    console.log('[audio] waiting message generated');
+  } catch (e) {
+    console.warn('[audio] waiting message generation failed:', e?.message || e);
+  } finally {
+    waitingAudioGenerating = false;
+  }
+}
+
+async function serveWaitingAudio(res) {
+  try {
+    await fs.promises.access(WAITING_AUDIO_PATH);
+  } catch {
+    // Not yet generated — trigger generation in background, return 404
+    ensureWaitingAudio().catch(() => {});
+    sendJson(res, 404, { error: 'waiting_audio_not_ready' });
+    return;
+  }
+  sendAudioFile(res, WAITING_AUDIO_PATH, false, 'en');
+}
+
 async function serveAudioPropReport(req, res, query = {}) {
   if (!ASYNC_API_KEY) {
     sendJson(res, 503, { error: 'audio_unavailable', reason: 'ASYNC_API_KEY missing' });
@@ -1754,6 +1836,12 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 200, { grid: grid4, lat: ll.lat, lon: ll.lon, place: geo.display });
     return;
   }
+  if (parts[0] === 'audio' && parts[1] === 'waiting') {
+    try { await serveWaitingAudio(res); } catch (e) {
+      sendJson(res, 502, { error: 'waiting_audio_error' });
+    }
+    return;
+  }
   if (parts[0] === 'audio' && (parts[1] === 'propreport' || parts[1] === 'report')) {
     try { await serveAudioPropReport(req, res, parsed.query || {}); } catch (e) {
       console.error('[audio] report error:', e?.message || e);
@@ -1774,6 +1862,9 @@ const server = http.createServer(async (req, res) => {
   }
   send(res, 404, 'text/plain', 'Not found');
 });
+
+// Pre-generate waiting audio in background at startup
+ensureAudioCacheDir().then(() => ensureWaitingAudio()).catch(() => {});
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`RBN proxy listening on 0.0.0.0:${PORT}`);

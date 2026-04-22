@@ -2064,6 +2064,21 @@ async function requestAudioReport() {
   setStatus('Generating audio propagation report...', 'warn');
   const ctrl = new AbortController();
   audioAbortCtrl = ctrl;
+
+  // Play the waiting message immediately while the real report generates
+  let waitingAudio = null;
+  try {
+    const waitResp = await fetch('/audio/waiting');
+    if (waitResp.ok) {
+      const waitBlob = await waitResp.blob();
+      const waitUrl = URL.createObjectURL(waitBlob);
+      waitingAudio = new Audio(waitUrl);
+      audioElement = waitingAudio;
+      setAudioButtonState('playing');
+      await waitingAudio.play().catch(() => {});
+    }
+  } catch {}
+
   try {
     const resp = await fetch(url, { signal: ctrl.signal });
     if (!resp.ok) {
@@ -2076,6 +2091,11 @@ async function requestAudioReport() {
     }
     const blob = await resp.blob();
     const objectUrl = URL.createObjectURL(blob);
+    // Stop waiting audio before playing real report
+    if (waitingAudio) {
+      try { waitingAudio.pause(); waitingAudio.src = ''; } catch {}
+      waitingAudio = null;
+    }
     const audio = new Audio(objectUrl);
     audioPlayback = { url: objectUrl };
     audioElement = audio;
@@ -2091,6 +2111,9 @@ async function requestAudioReport() {
     await audio.play();
     setStatus('Playing audio propagation report.', 'ok');
   } catch (e) {
+    if (waitingAudio) {
+      try { waitingAudio.pause(); waitingAudio.src = ''; } catch {}
+    }
     if (e?.name !== 'AbortError') {
       setStatus(`Audio report failed: ${e.message || 'unknown error'}`, 'error');
     }
