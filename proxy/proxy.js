@@ -1317,12 +1317,9 @@ async function fetchSolarDataForAudio() {
 }
 
 function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {}) {
-  const greeting = greetingForTimeOfDay(params.timeOfDay);
-  const utcSpoken = pronounceUtc(params.utc);
-
   const lines = [];
 
-  // ── Date header ──────────────────────────────────────────────────────────
+  // ── 1. Header (once) ─────────────────────────────────────────────────────
   const MONTH_NAMES = ['January','February','March','April','May','June',
     'July','August','September','October','November','December'];
   const ORDINALS = (n) => {
@@ -1332,37 +1329,34 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
   };
   const now = new Date();
   const utcDateSpoken = `${MONTH_NAMES[now.getUTCMonth()]} ${ORDINALS(now.getUTCDate())}, ${now.getUTCFullYear()}`;
-  lines.push(`${greeting}. H F Signals dot live propagation report, ${utcSpoken} U T C, ${utcDateSpoken}.`);
+  const utcSpoken = pronounceUtc(params.utc);
+  lines.push(`${greetingForTimeOfDay(params.timeOfDay)}. H F Signals dot live. ${utcSpoken} U T C, ${utcDateSpoken}.`);
 
-  // ── Solar / geomagnetic conditions ───────────────────────────────────────
+  // ── 2. Solar / geomagnetic (once) ────────────────────────────────────────
   if (params.includeSolar !== false) {
     const { sfi, ssn, a: aIdx, k: kIdx, wind, bz } = solar;
-    const solarParts = [];
-    if (sfi  != null) solarParts.push(`Solar Flux ${sfi}`);
-    if (ssn  != null) solarParts.push(`Sunspot Number ${ssn}`);
-    if (aIdx != null) solarParts.push(`A index ${aIdx}`);
-    if (kIdx != null) solarParts.push(`K index ${kIdx}`);
-    if (wind != null) solarParts.push(`Solar wind ${wind} kilometers per second`);
-    if (bz   != null) {
-      const polarity = bz < 0 ? 'negative' : 'positive';
-      solarParts.push(`B Z ${polarity} ${Math.abs(bz)} nanotesla`);
-    }
-    if (solarParts.length) lines.push(solarParts.join('. ') + '.');
+    const parts = [];
+    if (sfi  != null) parts.push(`Solar Flux ${sfi}`);
+    if (ssn  != null) parts.push(`Sunspot Number ${ssn}`);
+    if (aIdx != null) parts.push(`A index ${aIdx}`);
+    if (kIdx != null) parts.push(`K index ${kIdx}`);
+    if (wind != null) parts.push(`Solar wind ${wind} kilometers per second`);
+    if (bz   != null) parts.push(`B Z ${bz < 0 ? 'negative' : 'positive'} ${Math.abs(bz)} nanotesla`);
+    if (parts.length) lines.push(parts.join('. ') + '.');
   }
 
-  // ── Vantage point ────────────────────────────────────────────────────────
+  // ── 3. Vantage point (once) ──────────────────────────────────────────────
   if (params.mode === 'grid' && params.grid) {
-    const radiusNum = Math.round(params.radius);
-    const unitWord  = params.unit === 'km' ? 'kilometer' : 'mile';
+    const radiusNum  = Math.round(params.radius);
+    const unitWord   = params.unit === 'km' ? 'kilometer' : 'mile';
     const unitPlural = radiusNum === 1 ? unitWord : unitWord + 's';
-    const spokenPlace = params.gridPlaceName ? `, ${params.gridPlaceName}` : '';
-    lines.push(`Vantage point: ${radiusNum} ${unitPlural} around grid ${pronounceGrid(params.grid)}${spokenPlace}.`);
+    const place      = params.gridPlaceName ? `, ${params.gridPlaceName}` : '';
+    lines.push(`Vantage point: ${radiusNum} ${unitPlural} around grid ${pronounceGrid(params.grid)}${place}.`);
   } else {
-    const regionName = REGION_NAME_BY_KEY[params.fromRegion] || params.fromRegion;
-    lines.push(`Vantage point: ${regionName}.`);
+    lines.push(`Vantage point: ${REGION_NAME_BY_KEY[params.fromRegion] || params.fromRegion}.`);
   }
 
-  // ── Helper: Oxford-comma list ────────────────────────────────────────────
+  // ── Helper ───────────────────────────────────────────────────────────────
   function oxfordList(items) {
     if (!items.length) return '';
     if (items.length === 1) return items[0];
@@ -1370,80 +1364,72 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
     return items.slice(0, -1).join(', ') + `, and ${items[items.length - 1]}`;
   }
 
-  // ── Signal section ───────────────────────────────────────────────────────
-  // Strategy: iterate bands (high→low), then for each band list all regions
-  // that have signal on that band. This avoids repeating mode lines per region
-  // and groups the report by band — much more natural to listen to.
-  //
-  // Structure per band:
-  //   "On 20 meters: Eastern North America +28 dB, Europe +26 dB. CW and FTx."
-  //   "On 40 meters: Eastern North America +24 dB, Europe +16 dB. CW and FTx."
-  //
-  // Regions with NO signal on ANY band are batched at the end:
-  //   "No signals heard from Africa, Asia, or Oceania."
-
-  const regionEntries = Object.entries(bandResults); // toRegion → { band → result }
-
-  // Collect all active regions (have signal on at least one band)
-  const activeRegions  = new Set();
-  const silentRegions  = [];
-  for (const [toRegion, bandData] of regionEntries) {
-    const hasAny = params.bands.some(b => bandData[b]?.hasSignal);
-    if (hasAny) activeRegions.add(toRegion);
-    else        silentRegions.push(REGION_NAME_BY_KEY[toRegion] || toRegion);
+  // short SNR: "plus 28" — unit established by intro phrase
+  function spokenSnrShort(snr) {
+    if (!Number.isFinite(snr)) return 'unknown';
+    const db = Math.round(snr);
+    return `${db >= 0 ? 'plus' : 'minus'} ${Math.abs(db)}`;
   }
 
-  if (activeRegions.size === 0) {
-    lines.push('No signal data was found for any region.');
-  } else {
-    // Iterate bands in order (as configured — typically 160→10 or 10→160 depending on BAND_LABELS)
+  // ── 4. Global strongest signal (once) ────────────────────────────────────
+  let bestSnr = -Infinity, bestBand = null;
+  for (const region of REGION_KEYS) {
+    const bandData = bandResults[region];
+    if (!bandData) continue;
     for (const band of params.bands) {
-      // Collect regions with signal on this band, local region first
-      const onBand = [];
-      for (const [toRegion, bandData] of regionEntries) {
-        if (!activeRegions.has(toRegion)) continue;
-        const b = bandData[band];
-        if (!b?.hasSignal) continue;
-        onBand.push({ toRegion, b });
-      }
-      if (onBand.length === 0) continue;
-
-      // SNR list: "Eastern North America plus 28 dB, Europe plus 26 dB"
-      const snrParts = onBand.map(({ toRegion, b }) => {
-        const name = (toRegion === params.fromRegion)
-          ? `local ${REGION_NAME_BY_KEY[toRegion] || toRegion}`
-          : (REGION_NAME_BY_KEY[toRegion] || toRegion);
-        return `${name} ${spokenSnr(b.snr)}`;
-      });
-
-      // Mode summary — union across all regions for this band
-      const bandModeSet = new Set();
-      for (const { b } of onBand) {
-        if (b.modes) for (const m of b.modes) bandModeSet.add(m);
-        if (b.ssbOk) bandModeSet.add('SSB');
-      }
-      const modeLabels = [];
-      if (bandModeSet.has('CW'))               modeLabels.push('CW');
-      if (bandModeSet.has('FT8') || bandModeSet.has('FT4')) modeLabels.push('F T x');
-      if (bandModeSet.has('RTTY'))             modeLabels.push('RTTY');
-      if (bandModeSet.has('SSB'))              modeLabels.push('SSB');
-
-      const modeStr = modeLabels.length ? ` ${oxfordList(modeLabels)} active.` : '';
-      lines.push(`On ${bandLabelSpoken(band)}: ${snrParts.join(', ')}.${modeStr}`);
+      const b = bandData[band];
+      if (b?.hasSignal && b.snr > bestSnr) { bestSnr = b.snr; bestBand = band; }
     }
   }
-
-  // Silent regions batched into one sentence
-  if (silentRegions.length === 1) {
-    lines.push(`No signals heard from ${silentRegions[0]}.`);
-  } else if (silentRegions.length > 1) {
-    lines.push(`No signals heard from ${oxfordList(silentRegions)}.`);
+  if (bestBand) {
+    lines.push(`Strongest signal ${spokenSnr(bestSnr)} on ${bandLabelSpoken(bestBand)}.`);
   }
 
-  // ── Closing ──────────────────────────────────────────────────────────────
+  // ── 5. Per-region blocks in canonical order ───────────────────────────────
+  const silentRegions = [];
+
+  for (const region of REGION_KEYS) {
+    const bandData = bandResults[region];
+    if (!bandData) continue;
+
+    const activeBands = params.bands.filter(b => bandData[b]?.hasSignal);
+    if (activeBands.length === 0) {
+      silentRegions.push(REGION_NAME_BY_KEY[region] || region);
+      continue;
+    }
+
+    // Skip "Signals from X" for local/vantage region — already stated above
+    if (region !== params.fromRegion) {
+      lines.push(`Signals from ${REGION_NAME_BY_KEY[region] || region}.`);
+    }
+
+    // "Signal to Noise Ratios on the bands: 80, plus 18, 40, plus 24, ..."
+    const snrParts = activeBands.map(b => `${bandNumberOnly(b)}, ${spokenSnrShort(bandData[b].snr)}`);
+    lines.push(`Signal to Noise Ratios on the bands: ${snrParts.join(', ')}.`);
+
+    // Modes — union across active bands for this region
+    const modeset = new Set();
+    for (const band of activeBands) {
+      const b = bandData[band];
+      if (b.modes) for (const m of b.modes) modeset.add(m);
+      if (b.ssbOk) modeset.add('SSB');
+    }
+    const modeLabels = [];
+    if (modeset.has('CW'))                         modeLabels.push('CW');
+    if (modeset.has('FT8') || modeset.has('FT4'))  modeLabels.push('Digital');
+    if (modeset.has('RTTY'))                       modeLabels.push('RTTY');
+    if (modeset.has('SSB'))                        modeLabels.push('SSB');
+    if (modeLabels.length) lines.push(`${oxfordList(modeLabels)} active.`);
+  }
+
+  // ── 6. Silent regions batched (once) ─────────────────────────────────────
+  if (silentRegions.length === 1) lines.push(`No signals from ${silentRegions[0]}.`);
+  else if (silentRegions.length > 1) lines.push(`No signals from ${oxfordList(silentRegions)}.`);
+
+  // ── 7. Closing (once) ────────────────────────────────────────────────────
   const skimmers = sourceStats.skimmers || 0;
   const ftxCount = sourceStats.ftxCount || 0;
-  lines.push(`Point-in-time snapshot. ${skimmers} skimmers and ${ftxCount} F T x reports used. Visit H F Signals dot live for the latest.`);
+  lines.push(`${skimmers} skimmers, ${ftxCount} F T x reports. Visit H F Signals dot live for live data.`);
 
   return lines.join(' ');
 }
