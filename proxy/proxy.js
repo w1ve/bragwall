@@ -827,6 +827,9 @@ async function ensureAudioCacheDir() {
 function stableAudioParamKey(params) {
   // NOTE: timeOfDay/utc/greeting are NOT included — they are cosmetic and must
   // not bust the cache. The cache key is purely the signal-data parameters.
+  // NOTE: cw/rtty/ftx/ssb are NOT included — the server always uses all modes
+  // from live data. Including them caused cache misses on every request because
+  // the frontend computed them from live signal state (changed each click).
   const obj = {
     mode: params.mode,
     fromRegion: params.fromRegion || null,
@@ -836,10 +839,6 @@ function stableAudioParamKey(params) {
     toRegions: params.toRegions.slice().sort(),
     bands: params.bands.slice(),
     lang: params.lang,
-    ssb: !!params.ssb,
-    cw: !!params.cwChecked,
-    rtty: !!params.rttyChecked,
-    ftx: !!params.ftxChecked,
   };
   return JSON.stringify(obj);
 }

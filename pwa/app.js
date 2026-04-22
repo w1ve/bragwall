@@ -1992,23 +1992,8 @@ function buildAudioUrl(vantage = currentVantageState()) {
   q.set('bands', 'all');
   q.set('utc', new Date().toISOString().slice(11, 16));
 
-  // Pass mode checkbox states from current displayed data
-  // Determine which modes have any active signal across all regions/bands
-  const activeModeSet = new Set();
-  if (typeof meters !== 'undefined') {
-    for (const meter of Object.values(meters)) {
-      for (let bi = 0; bi < BANDS.length; bi++) {
-        if (meter.hasValue && meter.hasValue[bi]) {
-          const am = meter.activeModes(bi);
-          for (const m of am) activeModeSet.add(m);
-        }
-      }
-    }
-  }
-  q.set('cw',   activeModeSet.has('CW')   ? '1' : '0');
-  q.set('rtty', activeModeSet.has('RTTY') ? '1' : '0');
-  q.set('ftx',  (activeModeSet.has('FT8') || activeModeSet.has('FT4')) ? '1' : '0');
-  q.set('ssb',  activeModeSet.has('SSB')  ? '1' : '0');
+  // Mode flags: always request all modes — the server derives active modes from
+  // live data. Sending dynamic flags busted the cache (key changed each request).
 
   if (vantage.mode === 'grid') {
     if (!vantage.grid || !isValidGrid(vantage.grid)) return null;
