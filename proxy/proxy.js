@@ -1229,42 +1229,52 @@ function buildAudioReportText(params, bandResults, solar = {}) {
     lines.push(`From the vantage point of ${regionName}.`);
   }
 
-  const noSignal = [];
-  const withSignal = [];
-  for (const band of params.bands) {
-    const b = bandResults[band];
-    if (!b || !b.hasSignal) noSignal.push(band);
-    else withSignal.push({ band, ...b });
-  }
+  // Iterate each region that has signal data
+  const regionEntries = Object.entries(bandResults); // { regionKey: { band: result } }
+  if (regionEntries.length === 0) {
+    lines.push('No signal data was found for any region.');
+  } else {
+    for (const [toRegion, bandData] of regionEntries) {
+      const regionName = REGION_NAME_BY_KEY[toRegion] || toRegion;
+      lines.push(`Looking at ${regionName}.`);
 
-  for (const b of withSignal) {
-    const bandSpoken = bandLabelSpoken(b.band);
-    lines.push(`On ${bandSpoken}, the average signal to noise ratio is ${spokenSnr(b.snr)}.`);
+      const withSignal = [];
+      const noSignal = [];
+      for (const band of params.bands) {
+        const b = bandData[band];
+        if (!b || !b.hasSignal) noSignal.push(band);
+        else withSignal.push({ band, ...b });
+      }
 
-    // Mode spots — only if checkbox is checked
-    // Build mode list: FTx first, then CW, then RTTY
-    const reportedModes = [];
-    if (params.ftxChecked  && b.modes && (b.modes.has('FT8') || b.modes.has('FT4'))) reportedModes.push('FT eight or FT Four');
-    if (params.cwChecked   && b.modes && b.modes.has('CW'))   reportedModes.push('CW');
-    if (params.rttyChecked && b.modes && b.modes.has('RTTY')) reportedModes.push('RTTY');
+      for (const b of withSignal) {
+        const bandSpoken = bandLabelSpoken(b.band);
+        lines.push(`On ${bandSpoken}, the average signal to noise ratio is ${spokenSnr(b.snr)}.`);
 
-    if (reportedModes.length === 1) {
-      lines.push(`${reportedModes[0]} spots have been reported.`);
-    } else if (reportedModes.length === 2) {
-      lines.push(`${reportedModes[0]} and ${reportedModes[1]} spots have been reported.`);
-    } else if (reportedModes.length >= 3) {
-      const last = reportedModes[reportedModes.length - 1];
-      const rest = reportedModes.slice(0, -1).join(', ');
-      lines.push(`${rest}, and ${last} spots have been reported.`);
+        // Build mode list: FTx first, then CW, then RTTY
+        const reportedModes = [];
+        if (params.ftxChecked  && b.modes && (b.modes.has('FT8') || b.modes.has('FT4'))) reportedModes.push('FT eight or FT Four');
+        if (params.cwChecked   && b.modes && b.modes.has('CW'))   reportedModes.push('CW');
+        if (params.rttyChecked && b.modes && b.modes.has('RTTY')) reportedModes.push('RTTY');
+
+        if (reportedModes.length === 1) {
+          lines.push(`${reportedModes[0]} spots have been reported.`);
+        } else if (reportedModes.length === 2) {
+          lines.push(`${reportedModes[0]} and ${reportedModes[1]} spots have been reported.`);
+        } else if (reportedModes.length >= 3) {
+          const last = reportedModes[reportedModes.length - 1];
+          const rest = reportedModes.slice(0, -1).join(', ');
+          lines.push(`${rest}, and ${last} spots have been reported.`);
+        }
+
+        if (b.ssbOk) {
+          lines.push(`Signal levels will support SSB contacts.`);
+        }
+      }
+
+      if (noSignal.length) {
+        lines.push(`${joinBands(noSignal)} have no reported signals.`);
+      }
     }
-
-    if (b.ssbOk) {
-      lines.push(`Signal levels will support SSB contacts.`);
-    }
-  }
-
-  if (noSignal.length) {
-    lines.push(`${joinBands(noSignal)} have no reported signals.`);
   }
 
   lines.push('Go to H F Signals dot live for the latest data.');
@@ -1453,6 +1463,21 @@ function sendAudioFile(res, filePath, generated, lang) {
   });
 }
 
+async function collectBandResultsPerRegion(params) {
+  // Returns { regionKey: { band: bandResult } } for every toRegion that has data
+  const results = {};
+  for (const toRegion of params.toRegions) {
+    const singleParams = { ...params, toRegions: [toRegion] };
+    const bandState = await collectRbnBandResults(singleParams);
+    augmentWithPskBandResults(singleParams, bandState);
+    const finalized = finalizeBandResults(singleParams, bandState);
+    // Only include this region if at least one band has a signal
+    const hasAny = Object.values(finalized).some(b => b && b.hasSignal);
+    if (hasAny) results[toRegion] = finalized;
+  }
+  return results;
+}
+
 async function serveAudioPropReport(req, res, query = {}) {
   if (!ASYNC_API_KEY) {
     sendJson(res, 503, { error: 'audio_unavailable', reason: 'ASYNC_API_KEY missing' });
@@ -1468,11 +1493,9 @@ async function serveAudioPropReport(req, res, query = {}) {
 
   await ensureAudioCacheDir();
   await ensurePskForAudio();
-  const bandState = await collectRbnBandResults(params);
-  augmentWithPskBandResults(params, bandState);
-  const bandResults = finalizeBandResults(params, bandState);
+  const regionResults = await collectBandResultsPerRegion(params);
   const solar = await fetchSolarDataForAudio();
-  const englishText = buildAudioReportText(params, bandResults, solar);
+  const englishText = buildAudioReportText(params, regionResults, solar);
   const translatedText = await translateTextIfNeeded(englishText, params.lang);
   const transcript = translatedText && translatedText.trim() ? translatedText : englishText;
 
