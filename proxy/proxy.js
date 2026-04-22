@@ -722,9 +722,60 @@ function utcTimeLabel() {
   return `${hh}:${mm}`;
 }
 
-function pickTimeOfDay(raw, utcLabel) {
+async function countryFromIp(ip) {
+  if (!ip || ip === '127.0.0.1' || ip === '::1') return null;
+  try {
+    const raw = await fetchRaw(`https://ip-api.com/json/${encodeURIComponent(ip)}?fields=countryCode,timezone`, 4000);
+    const data = JSON.parse(raw);
+    if (data && data.countryCode) return { countryCode: data.countryCode, timezone: data.timezone || null };
+  } catch {}
+  return null;
+}
+
+function localHourFromTimezone(timezone) {
+  try {
+    const fmt = new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: timezone });
+    const parts = fmt.formatToParts(new Date());
+    const h = parts.find(p => p.type === 'hour');
+    return h ? Number(h.value) : null;
+  } catch {}
+  return null;
+}
+
+function timeOfDayFromLocalHour(localHour) {
+  if (localHour === null) return null;
+  if (localHour < 12) return 'morning';
+  if (localHour < 18) return 'afternoon';
+  return 'evening';
+}
+
+function pronounceUtc(utcStr) {
+  // utcStr = "HH:MM" → "Zero Nine Thirty Seven" or "Twenty Three Twenty Five"
+  if (!/^\d{2}:\d{2}$/.test(utcStr)) return utcStr;
+  const ones = ['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine'];
+  const teens = ['Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const tens = ['','','Twenty','Thirty','Forty','Fifty'];
+
+  function sayTwoDigit(n) {
+    if (n < 10) return 'Zero ' + ones[n];
+    if (n < 20) return teens[n - 10];
+    const t = Math.floor(n / 10);
+    const u = n % 10;
+    return u === 0 ? tens[t] : tens[t] + ' ' + ones[u];
+  }
+
+  const hh = Number(utcStr.slice(0, 2));
+  const mm = Number(utcStr.slice(3, 5));
+  const hhText = sayTwoDigit(hh);
+  const mmText = mm === 0 ? 'Hundred' : sayTwoDigit(mm);
+  return hhText + ' ' + mmText;
+}
+
+function pickTimeOfDay(raw, utcLabel, localHour) {
   const v = String(raw || '').trim().toLowerCase();
   if (v === 'morning' || v === 'afternoon' || v === 'evening') return v;
+  // Prefer local hour from IP geo if available
+  if (localHour !== null && localHour !== undefined) return timeOfDayFromLocalHour(localHour);
   let hh = 12;
   if (typeof utcLabel === 'string' && /^\d{2}:\d{2}$/.test(utcLabel)) hh = Number(utcLabel.slice(0, 2));
   if (hh < 12) return 'morning';
@@ -743,20 +794,9 @@ function regionName(key) {
 }
 
 function snrToSUnit(snr) {
-  if (!Number.isFinite(snr)) return 'S0';
-  if (snr < 1) return 'S0';
-  if (snr < 5) return 'S1';
-  if (snr < 9) return 'S2';
-  if (snr < 13) return 'S3';
-  if (snr < 17) return 'S4';
-  if (snr < 21) return 'S5';
-  if (snr < 25) return 'S6';
-  if (snr < 31) return 'S7';
-  if (snr < 37) return 'S8';
-  if (snr < 43) return 'S9';
-  if (snr < 53) return 'S9+10';
-  if (snr < 63) return 'S9+20';
-  return 'S9+30';
+  if (!Number.isFinite(snr)) return '0dB';
+  const db = Math.round(snr);
+  return (db >= 0 ? '+' : '') + db + 'dB';
 }
 
 function ftxSnrToRbnScale(ftxSnr) {
@@ -821,7 +861,7 @@ function bandResultTemplate() {
   };
 }
 
-function parseAudioQuery(query = {}, headers = {}) {
+async function parseAudioQuery(query = {}, headers = {}, clientIp = null) {
   const modeFromQuery = String(query.mode || '').trim().toLowerCase();
   const mode = modeFromQuery === 'grid' ? 'grid' : 'region';
   const fromRegion = normalizeRegionKey(query.from || query.region || query.source || 'ENA') || 'ENA';
@@ -833,8 +873,21 @@ function parseAudioQuery(query = {}, headers = {}) {
   const bands = parseBandSelection(query.band, query.bands);
   const lang = normalizeLanguageCode(query.lang || query.language || headers['accept-language'] || 'en');
   const utc = String(query.utc || utcTimeLabel()).trim();
-  const timeOfDay = pickTimeOfDay(query.timeOfDay || query.tod, utc);
+
+  // IP geo-detect country & local time for accurate greeting
+  let localHour = null;
+  const ip = clientIp || (headers['x-forwarded-for'] || '').split(',')[0].trim() || null;
+  if (ip) {
+    const geoInfo = await countryFromIp(ip);
+    if (geoInfo && geoInfo.timezone) localHour = localHourFromTimezone(geoInfo.timezone);
+  }
+  const timeOfDay = pickTimeOfDay(query.timeOfDay || query.tod, utc, localHour);
+
   const ssb = parseBoolean(query.ssb || query.includeSsb || query.ssbChecked);
+  // Mode checkboxes from client (cw, rtty, ft8/ftx)
+  const cwChecked  = query.cw  !== undefined ? parseBoolean(query.cw)  : true;
+  const rttyChecked = query.rtty !== undefined ? parseBoolean(query.rtty) : true;
+  const ftxChecked = query.ftx !== undefined ? parseBoolean(query.ftx) : true;
   return {
     mode,
     fromRegion,
@@ -848,6 +901,9 @@ function parseAudioQuery(query = {}, headers = {}) {
     utc,
     timeOfDay,
     ssb,
+    cwChecked,
+    rttyChecked,
+    ftxChecked,
   };
 }
 
@@ -1010,6 +1066,7 @@ function finalizeBandResults(params, bandState) {
       hasSignal,
       snr: hasSignal ? Math.round(combined * 10) / 10 : null,
       sUnit: hasSignal ? snrToSUnit(combined) : null,
+      modes: modes,
       cwRttyFtx: hasSignal && (modes.has('CW') || modes.has('RTTY') || modes.has('FT8') || modes.has('FT4')),
       ssbOk: !!params.ssb && hasSignal && combined >= SSB_SNR_THRESHOLD,
     };
@@ -1017,15 +1074,33 @@ function finalizeBandResults(params, bandState) {
   return out;
 }
 
+function bandLabelSpoken(band) {
+  // "20m" => "20 meters", "160m" => "160 meters"
+  return band.replace(/m$/, ' meters');
+}
+
+function spokenSnr(snr) {
+  // returns e.g. "plus 6 D B Signal to Noise Ratio" or "minus 2 D B Signal to Noise Ratio"
+  if (!Number.isFinite(snr)) return 'unknown';
+  const db = Math.round(snr);
+  const sign = db >= 0 ? 'plus' : 'minus';
+  return `${sign} ${Math.abs(db)} D B Signal to Noise Ratio`;
+}
+
+function joinBands(bandList) {
+  const spoken = bandList.map(bandLabelSpoken);
+  if (spoken.length === 0) return '';
+  if (spoken.length === 1) return spoken[0];
+  if (spoken.length === 2) return spoken.join(' and ');
+  return spoken.slice(0, -1).join(', ') + ', and ' + spoken[spoken.length - 1];
+}
+
 function buildAudioReportText(params, bandResults) {
   const greeting = greetingForTimeOfDay(params.timeOfDay);
-  const sourceText = params.mode === 'grid'
-    ? `${params.grid} with a ${params.radius} ${params.unit} radius`
-    : regionName(params.fromRegion);
+  const utcSpoken = pronounceUtc(params.utc);
 
   const lines = [];
-  lines.push(`${greeting}, this is your ${params.utc} UTC signal levels report from hfsignals.live.`);
-  lines.push(`Here are the current signal levels from ${sourceText}.`);
+  lines.push(`${greeting}, this is the H F Signals dot live Radio Conditions report for ${utcSpoken} U T C.`);
 
   const noSignal = [];
   const withSignal = [];
@@ -1034,13 +1109,36 @@ function buildAudioReportText(params, bandResults) {
     if (!b || !b.hasSignal) noSignal.push(band);
     else withSignal.push({ band, ...b });
   }
-  if (noSignal.length) lines.push(`${noSignal.join(', ')} report no signals.`);
+
   for (const b of withSignal) {
-    lines.push(`${b.band} signal levels are ${b.sUnit}.`);
-    if (b.cwRttyFtx) lines.push('CW, RTTY and FT4/8 QSOs are possible.');
-    if (b.ssbOk) lines.push('Propagation will support SSB QSOs.');
+    const bandSpoken = bandLabelSpoken(b.band);
+    lines.push(`On ${bandSpoken}, the average signal to noise ratio is ${spokenSnr(b.snr)}.`);
+
+    // Mode spots — only if checkbox is checked
+    const reportedModes = [];
+    if (params.cwChecked  && b.modes && b.modes.has('CW'))   reportedModes.push('CW');
+    if (params.rttyChecked && b.modes && b.modes.has('RTTY')) reportedModes.push('RTTY');
+    if (params.ftxChecked  && b.modes && (b.modes.has('FT8') || b.modes.has('FT4'))) reportedModes.push('FT8');
+
+    if (reportedModes.length === 1) {
+      lines.push(`${reportedModes[0]} spots have been reported.`);
+    } else if (reportedModes.length === 2) {
+      lines.push(`${reportedModes[0]} and ${reportedModes[1]} spots have been reported.`);
+    } else if (reportedModes.length >= 3) {
+      const last = reportedModes[reportedModes.length - 1];
+      const rest = reportedModes.slice(0, -1).join(', ');
+      lines.push(`${rest}, and ${last} spots have been reported.`);
+    }
+
+    if (params.ssb && b.ssbOk) {
+      lines.push(`Signal levels reported support SSB contacts.`);
+    }
   }
-  lines.push('Check hfsignals.info for the latest information.');
+
+  if (noSignal.length) {
+    lines.push(`${joinBands(noSignal)} have no reported signals.`);
+  }
+
   return lines.join(' ');
 }
 
@@ -1227,7 +1325,9 @@ async function serveAudioPropReport(req, res, query = {}) {
     sendJson(res, 503, { error: 'audio_unavailable', reason: 'ASYNC_API_KEY missing' });
     return;
   }
-  const params = parseAudioQuery(query, req.headers || {});
+  const clientIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+    || req.socket?.remoteAddress || null;
+  const params = await parseAudioQuery(query, req.headers || {}, clientIp);
   if (params.mode === 'grid' && !params.grid) {
     sendJson(res, 400, { error: 'invalid_grid', message: 'grid mode requires valid 4-char grid parameter' });
     return;
@@ -1388,3 +1488,4 @@ server.listen(PORT, '0.0.0.0', () => {
 
 process.on('SIGTERM', () => server.close(() => process.exit(0)));
 process.on('SIGINT',  () => server.close(() => process.exit(0)));
+

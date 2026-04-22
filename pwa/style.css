@@ -487,12 +487,16 @@ body.theme-cb .theme-btn.active {
 }
 
 .vantage-audio-btn {
-  font-family: 'Share Tech Mono', monospace;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 20px;
+  line-height: 1;
   border: 1px solid rgba(0,212,170,0.35);
-  border-radius: 999px;
-  padding: 5px 11px;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: var(--bg3);
   color: var(--accent);
   cursor: pointer;
@@ -657,7 +661,7 @@ body.theme-cb .vantage-audio-btn.playing {
   .vantage-display-value { font-size: 14px; }
   .vantage-skimmer-wrap { margin-top: 8px; }
   .vantage-audio-wrap { margin-top: 6px; }
-  .vantage-audio-btn { font-size: 11px; padding: 4px 9px; }
+  .vantage-audio-btn { font-size: 16px; width: 30px; height: 30px; }
   .vantage-map-canvas { height: 120px; margin-top: 6px; }
   .desktop-main { display: block; padding: 0 10px; }
   #sw-bar {
@@ -1115,3 +1119,4 @@ body::after {
 .meters-scroll::-webkit-scrollbar { height: 4px; }
 .meters-scroll::-webkit-scrollbar-track { background: var(--bg); }
 .meters-scroll::-webkit-scrollbar-thumb { background: var(--accent2); border-radius: 2px; }
+
