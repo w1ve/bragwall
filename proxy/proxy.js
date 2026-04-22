@@ -1140,12 +1140,15 @@ async function reverseGeoGrid(grid) {
   }
 
   // Compute the 4 quadrant-center sample points (25%/75% offsets)
-  // Grid square is 2° lon × 1° lat
+  // Grid size depends on precision: 4-char = 2°lon × 1°lat, 6-char = 2/24°lon × 1/24°lat
+  const is6char = key.length >= 6;
+  const halfLon = is6char ? (2/24)/2 : 0.5;   // half the grid width
+  const halfLat = is6char ? (1/24)/2 : 0.25;  // half the grid height
   const samplePoints = [
-    { lat: ll.lat - 0.25, lon: ll.lon - 0.5 },  // SW quadrant
-    { lat: ll.lat + 0.25, lon: ll.lon - 0.5 },  // NW quadrant
-    { lat: ll.lat - 0.25, lon: ll.lon + 0.5 },  // SE quadrant
-    { lat: ll.lat + 0.25, lon: ll.lon + 0.5 },  // NE quadrant
+    { lat: ll.lat - halfLat/2, lon: ll.lon - halfLon/2 },  // SW quadrant
+    { lat: ll.lat + halfLat/2, lon: ll.lon - halfLon/2 },  // NW quadrant
+    { lat: ll.lat - halfLat/2, lon: ll.lon + halfLon/2 },  // SE quadrant
+    { lat: ll.lat + halfLat/2, lon: ll.lon + halfLon/2 },  // NE quadrant
   ];
 
   function parseAddr(addr) {
