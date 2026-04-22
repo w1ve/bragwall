@@ -1128,25 +1128,67 @@ function pronounceGrid(grid) {
 async function reverseGeoGrid(grid) {
   const key = grid.toUpperCase().slice(0, 4);
   const cached = gridPlaceCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.name;
+  if (cached && cached.expiresAt > Date.now()) return cached.result;
 
   const ll = gridToLatLon(key);
-  if (!ll) { gridPlaceCache.set(key, { name: null, expiresAt: Date.now() + GRID_PLACE_CACHE_MS }); return null; }
+  if (!ll) {
+    const r = { display: null, spoken: null };
+    gridPlaceCache.set(key, { result: r, expiresAt: Date.now() + GRID_PLACE_CACHE_MS });
+    return r;
+  }
 
   try {
     const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?lat=${ll.lat}&lon=${ll.lon}&format=json&zoom=10&addressdetails=1`;
     const raw = await fetchRaw(nominatimUrl, 8000, { 'User-Agent': 'hfsignals-proxy/1.0 (hfsignals.live)' });
     const data = JSON.parse(raw);
     const addr = data?.address || {};
-    // Prefer city/town/village/county; skip if clearly ocean/sea/nothing
+
+    // City/town/village/hamlet, or fall back to county
     const place = addr.city || addr.town || addr.village || addr.hamlet
                 || addr.county || addr.state_district || null;
-    const name = place || null;
-    gridPlaceCache.set(key, { name, expiresAt: Date.now() + GRID_PLACE_CACHE_MS });
-    return name;
+
+    const cc = (addr.country_code || '').toLowerCase();   // 'us', 'ca', 'gb', ...
+    const isNorthAmerica = (cc === 'us' || cc === 'ca');
+
+    // State/province abbreviation — Nominatim provides state_code for US/CA
+    const stateCode = addr['ISO3166-2-lvl4']
+      ? addr['ISO3166-2-lvl4'].split('-').pop()   // e.g. "US-PA" → "PA"
+      : null;
+
+    // Country label — omit for US/CA (stateCode is enough), show for others
+    const countryLabel = isNorthAmerica ? null : (addr.country || null);
+
+    // Build display string:  "Clarendon, PA"  /  "Halifax, NS"  /  "London, United Kingdom"
+    let display = null;
+    if (place) {
+      const suffix = stateCode || countryLabel;
+      display = suffix ? `${place}, ${suffix}` : place;
+    } else if (stateCode) {
+      display = stateCode;
+    } else if (countryLabel) {
+      display = countryLabel;
+    }
+
+    // Spoken version for audio — same structure but full state name for US/CA
+    let spoken = null;
+    if (place) {
+      const spokenSuffix = isNorthAmerica
+        ? (addr.state || stateCode || null)   // full name: "Pennsylvania"
+        : (addr.country || null);
+      spoken = spokenSuffix ? `${place}, ${spokenSuffix}` : place;
+    } else if (addr.state) {
+      spoken = addr.state;
+    } else if (addr.country) {
+      spoken = addr.country;
+    }
+
+    const result = { display, spoken };
+    gridPlaceCache.set(key, { result, expiresAt: Date.now() + GRID_PLACE_CACHE_MS });
+    return result;
   } catch (e) {
-    gridPlaceCache.set(key, { name: null, expiresAt: Date.now() + 30 * 60 * 1000 });
-    return null;
+    const r = { display: null, spoken: null };
+    gridPlaceCache.set(key, { result: r, expiresAt: Date.now() + 30 * 60 * 1000 });
+    return r;
   }
 }
 
@@ -1518,7 +1560,8 @@ async function serveAudioPropReport(req, res, query = {}) {
   await ensureAudioCacheDir();
   await ensurePskForAudio();
   if (params.mode === 'grid' && params.grid) {
-    params.gridPlaceName = await reverseGeoGrid(params.grid);
+    const geo = await reverseGeoGrid(params.grid);
+    params.gridPlaceName = geo.spoken;
   }
   const regionResults = await collectBandResultsPerRegion(params);
   const solar = await fetchSolarDataForAudio();
@@ -1673,8 +1716,8 @@ const server = http.createServer(async (req, res) => {
     if (!grid4 || grid4.length < 4) { sendJson(res, 400, { error: 'bad_grid' }); return; }
     const ll = gridToLatLon(grid4);
     if (!ll) { sendJson(res, 400, { error: 'invalid_grid' }); return; }
-    const place = await reverseGeoGrid(grid4);
-    sendJson(res, 200, { grid: grid4, lat: ll.lat, lon: ll.lon, place });
+    const geo = await reverseGeoGrid(grid4);
+    sendJson(res, 200, { grid: grid4, lat: ll.lat, lon: ll.lon, place: geo.display });
     return;
   }
   if (parts[0] === 'audio' && (parts[1] === 'propreport' || parts[1] === 'report')) {
