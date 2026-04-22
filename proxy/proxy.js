@@ -1125,6 +1125,8 @@ function pronounceGrid(grid) {
   }).join(' ');
 }
 
+// Sample 4 quadrant-center points within the grid square, resolve each via Nominatim,
+// then pick the best result: drop ocean/null, prefer US over CA, then plurality vote.
 async function reverseGeoGrid(grid) {
   const key = grid.toUpperCase().slice(0, 4);
   const cached = gridPlaceCache.get(key);
@@ -1137,55 +1139,81 @@ async function reverseGeoGrid(grid) {
     return r;
   }
 
-  try {
-    const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?lat=${ll.lat}&lon=${ll.lon}&format=json&zoom=10&addressdetails=1`;
-    const raw = await fetchRaw(nominatimUrl, 8000, { 'User-Agent': 'hfsignals-proxy/1.0 (hfsignals.live)' });
-    const data = JSON.parse(raw);
-    const addr = data?.address || {};
+  // Compute the 4 quadrant-center sample points (25%/75% offsets)
+  // Grid square is 2° lon × 1° lat
+  const samplePoints = [
+    { lat: ll.lat - 0.25, lon: ll.lon - 0.5 },  // SW quadrant
+    { lat: ll.lat + 0.25, lon: ll.lon - 0.5 },  // NW quadrant
+    { lat: ll.lat - 0.25, lon: ll.lon + 0.5 },  // SE quadrant
+    { lat: ll.lat + 0.25, lon: ll.lon + 0.5 },  // NE quadrant
+  ];
 
-    // City/town/village/hamlet, or fall back to county
-    const place = addr.city || addr.town || addr.village || addr.hamlet
-                || addr.county || addr.state_district || null;
-
-    const cc = (addr.country_code || '').toLowerCase();   // 'us', 'ca', 'gb', ...
+  function parseAddr(addr) {
+    if (!addr) return null;
+    const cc = (addr.country_code || '').toLowerCase();
+    if (!cc) return null; // ocean / no result
     const isNorthAmerica = (cc === 'us' || cc === 'ca');
-
-    // State/province abbreviation — Nominatim provides state_code for US/CA
     const stateCode = addr['ISO3166-2-lvl4']
-      ? addr['ISO3166-2-lvl4'].split('-').pop()   // e.g. "US-PA" → "PA"
-      : null;
-
-    // Country label — omit for US/CA (stateCode is enough), show for others
+      ? addr['ISO3166-2-lvl4'].split('-').pop() : null;
+    const stateFull = addr.state
+      ? addr.state.split(' / ')[0].trim() : null;
+    const city = addr.city || addr.town || addr.village || addr.hamlet
+              || addr.county || addr.state_district || null;
     const countryLabel = isNorthAmerica ? null : (addr.country || null);
+    return { cc, isNorthAmerica, stateCode, stateFull, city, countryLabel };
+  }
 
-    // Build display string:  "Clarendon, PA"  /  "Halifax, NS"  /  "London, United Kingdom"
-    // If no city/town — fall back to full state name (cleaner than bare abbreviation)
-    const stateFull = addr.state ? addr.state.split(' / ')[0].trim() : null; // handle "New Brunswick / Nouveau-Brunswick"
-    let display = null;
-    if (place) {
-      const suffix = stateCode || countryLabel;
-      display = suffix ? `${place}, ${suffix}` : place;
-    } else if (stateFull) {
-      // No city — show "New Brunswick, Canada" or just "New Brunswick" for US/CA
-      display = isNorthAmerica ? stateFull : `${stateFull}, ${addr.country}`;
-    } else if (countryLabel) {
-      display = countryLabel;
+  function buildStrings(p) {
+    if (!p) return { display: null, spoken: null };
+    let display = null, spoken = null;
+    if (p.city) {
+      const suffix = p.stateCode || p.countryLabel;
+      display = suffix ? `${p.city}, ${suffix}` : p.city;
+      const spokenSuffix = p.isNorthAmerica ? (p.stateFull || p.stateCode) : p.countryLabel;
+      spoken = spokenSuffix ? `${p.city}, ${spokenSuffix}` : p.city;
+    } else if (p.stateFull) {
+      display = p.isNorthAmerica ? p.stateFull : `${p.stateFull}, ${p.countryLabel || ''}`.trim().replace(/,$/, '');
+      spoken = display;
+    } else if (p.countryLabel) {
+      display = p.countryLabel;
+      spoken = p.countryLabel;
+    }
+    return { display, spoken };
+  }
+
+  try {
+    // Fetch all 4 sample points in parallel
+    const fetches = samplePoints.map(({ lat, lon }) => {
+      const nomUrl = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=8&addressdetails=1`;
+      return fetchRaw(nomUrl, 8000, { 'User-Agent': 'hfsignals-proxy/1.0 (hfsignals.live)' })
+        .then(raw => parseAddr(JSON.parse(raw)?.address))
+        .catch(() => null);
+    });
+    const parsed = await Promise.all(fetches);
+    const valid = parsed.filter(Boolean).filter(p => p.cc);
+
+    let best = null;
+    if (valid.length > 0) {
+      // Prefer US results (hams name coastal grids after the nearest US state)
+      const usResults = valid.filter(p => p.cc === 'us');
+      const pool = usResults.length > 0 ? usResults : valid;
+
+      // Plurality vote on (stateFull, cc)
+      const tally = {};
+      for (const p of pool) {
+        const k = `${p.stateFull || p.countryLabel}|${p.cc}`;
+        if (!tally[k]) tally[k] = { p, count: 0 };
+        tally[k].count++;
+        // Prefer results with a city name
+        if (p.city && !tally[k].p.city) tally[k].p = p;
+      }
+      const winner = Object.values(tally).sort((a, b) =>
+        b.count - a.count || (b.p.city ? 1 : 0) - (a.p.city ? 1 : 0)
+      )[0];
+      best = winner.p;
     }
 
-    // Spoken version for audio — full state name always
-    let spoken = null;
-    if (place) {
-      const spokenSuffix = isNorthAmerica
-        ? (stateFull || stateCode || null)
-        : (addr.country || null);
-      spoken = spokenSuffix ? `${place}, ${spokenSuffix}` : place;
-    } else if (stateFull) {
-      spoken = isNorthAmerica ? stateFull : `${stateFull}, ${addr.country}`;
-    } else if (addr.country) {
-      spoken = addr.country;
-    }
-
-    const result = { display, spoken };
+    const result = buildStrings(best);
     gridPlaceCache.set(key, { result, expiresAt: Date.now() + GRID_PLACE_CACHE_MS });
     return result;
   } catch (e) {
