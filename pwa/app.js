@@ -2108,12 +2108,17 @@ async function requestAudioReport() {
   let waitingAudio = null;
   let waitingObjectUrl = null;
 
-  // Kick off the real report fetch immediately (runs in background)
+  // Kick off the real report fetch immediately
   const reportFetchPromise = fetch(url, { signal: ctrl.signal });
 
-  // Also kick off waiting audio fetch immediately — play it right away,
-  // don't race: the waiting message should always play while the report generates.
-  (async () => {
+  // Play waiting audio only if the server is generating (not a cache hit).
+  // We race the report fetch against a short timer — if the report resolves
+  // first it was a cache hit and we skip the waiting message entirely.
+  const CACHE_HIT_GRACE_MS = 600; // ms before we assume it's not cached
+  let waitingAudioStarted = false;
+  const waitingTimer = setTimeout(async () => {
+    // Still waiting after grace period — go ahead and play the waiting message
+    waitingAudioStarted = true;
     try {
       const r = await fetch('/audio/waiting');
       if (!r.ok) return;
@@ -2122,11 +2127,9 @@ async function requestAudioReport() {
       waitingObjectUrl = URL.createObjectURL(blob);
       waitingAudio = new Audio(waitingObjectUrl);
       audioElement = waitingAudio;
-      // Keep spinner+countdown running while waiting audio plays —
-      // do NOT transition to 'playing' state until the real report is ready
       waitingAudio.play().catch(() => {});
     } catch {}
-  })();
+  }, CACHE_HIT_GRACE_MS);
 
   try {
     // Await the real report response
@@ -2142,7 +2145,8 @@ async function requestAudioReport() {
     const blob = await resp.blob();
     const objectUrl = URL.createObjectURL(blob);
 
-    // Stop waiting audio before playing real report
+    // Report resolved — cancel waiting timer and stop any waiting audio
+    clearTimeout(waitingTimer);
     if (waitingAudio) {
       try { waitingAudio.pause(); waitingAudio.src = ''; } catch {}
       if (waitingObjectUrl) { URL.revokeObjectURL(waitingObjectUrl); waitingObjectUrl = null; }
@@ -2164,6 +2168,7 @@ async function requestAudioReport() {
     await audio.play();
     setStatus('Playing audio propagation report.', 'ok');
   } catch (e) {
+    clearTimeout(waitingTimer);
     if (waitingAudio) {
       try { waitingAudio.pause(); waitingAudio.src = ''; } catch {}
       if (waitingObjectUrl) { URL.revokeObjectURL(waitingObjectUrl); waitingObjectUrl = null; }

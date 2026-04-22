@@ -821,6 +821,21 @@ function ftxSnrToRbnScale(ftxSnr) {
 async function ensureAudioCacheDir() {
   if (audioCacheDirReady) return;
   await fs.promises.mkdir(AUDIO_CACHE_DIR, { recursive: true });
+  // Purge stale dynamic cache files on startup (static waiting/outro are exempt)
+  const staticFiles = new Set([
+    path.basename(WAITING_AUDIO_PATH),
+    path.basename(OUTRO_AUDIO_PATH),
+  ]);
+  try {
+    const files = await fs.promises.readdir(AUDIO_CACHE_DIR);
+    await Promise.all(
+      files
+        .filter(f => f.endsWith('.mp3') && !staticFiles.has(f))
+        .map(f => fs.promises.unlink(path.join(AUDIO_CACHE_DIR, f)).catch(() => {}))
+    );
+    if (files.filter(f => f.endsWith('.mp3') && !staticFiles.has(f)).length > 0)
+      console.log('[audio] startup cache purge complete');
+  } catch {}
   audioCacheDirReady = true;
 }
 
