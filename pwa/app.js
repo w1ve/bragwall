@@ -238,6 +238,7 @@ const Settings = {
     grid: '',
     radiusIndex: 2,
     unit: 'auto',
+    theme: 'dark',
     autoUpdate: false,
     desktopCollapsed: [],
   },

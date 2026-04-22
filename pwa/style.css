@@ -27,6 +27,51 @@
   --pad:       5px;
 }
 
+/* Theme overrides */
+body.theme-light {
+  --bg:        #f4f7fb;
+  --bg2:       #ffffff;
+  --bg3:       #eef3f8;
+  --accent:    #00886a;
+  --accent2:   #00745a;
+  --text:      #1a1a2e;
+  --text-dim:  #5f6f8c;
+  --text-hdr:  #00745a;
+  --green:     #008830;
+  --yellow:    #886600;
+  --orange:    #884400;
+  --red:       #880010;
+  --pk-green:  #8ac79e;
+  --pk-yellow: #d6c98a;
+  --pk-orange: #d6b08a;
+  --pk-red:    #d49898;
+  --dimmed:    #e2e8f0;
+  --border:    #00886a;
+  --no-data:   #8a94a8;
+}
+
+body.theme-cb {
+  --bg:        #0f1222;
+  --bg2:       #151a31;
+  --bg3:       #1b2140;
+  --accent:    #4fd7ff;
+  --accent2:   #3bc3ea;
+  --text:      #e8f3ff;
+  --text-dim:  #9fb0c9;
+  --text-hdr:  #4fd7ff;
+  --green:     #2aa8ff;
+  --yellow:    #f3cf3c;
+  --orange:    #f08f3a;
+  --red:       #d24c86;
+  --pk-green:  #176ca6;
+  --pk-yellow: #8a7420;
+  --pk-orange: #8e5220;
+  --pk-red:    #7a2f50;
+  --dimmed:    #232a4f;
+  --border:    #4fd7ff;
+  --no-data:   #6f7f99;
+}
+
 html, body {
   height: 100%;
   background: var(--bg);
@@ -104,6 +149,37 @@ h1 {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+
+.theme-controls {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.theme-btn {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 5px 9px;
+  border-radius: 4px;
+  border: 1px solid rgba(0,212,170,0.35);
+  color: var(--text);
+  background: var(--bg3);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.theme-btn:hover {
+  border-color: var(--accent);
+  background: rgba(0,212,170,0.10);
+}
+
+.theme-btn.active {
+  color: #ffffff;
+  background: var(--accent2);
+  border-color: var(--accent);
 }
 
 .ctrl-label {
@@ -898,6 +974,8 @@ canvas.bar-canvas {
   .check-label input[type="checkbox"] { width: 14px; height: 14px; }
   .unit-toggle   { font-size: 12px; padding: 4px 8px; min-width: 30px; }
   .skimmer-count { font-size: 11px; min-width: 130px; padding: 3px 8px; }
+  .theme-controls { margin-left: 0; width: 100%; justify-content: flex-end; }
+  .theme-btn { font-size: 11px; padding: 3px 7px; }
 }
 
 /* ── Status bar ──────────────────────────────────────────────────── */
