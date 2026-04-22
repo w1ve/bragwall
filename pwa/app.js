@@ -1525,6 +1525,7 @@ let skimmerCount = 0;
 let pollInFlight = false;
 let pollPending = false;
 let refreshDebounceTimer = null;
+let refreshRevision = 0;
 
 function bandForFreq(khz) {
   const i = BANDS.findIndex(b => khz >= b.min && khz <= b.max);
@@ -1547,13 +1548,15 @@ async function fetchPsk() {
   }
 }
 
-async function pollOnce() {
+async function pollOnce(revisionAtRequest = refreshRevision) {
   if (!isRunning) return;
+  if (revisionAtRequest !== refreshRevision) return;
   if (pollInFlight) {
     pollPending = true;
     return;
   }
   pollInFlight = true;
+  const activeRevision = revisionAtRequest;
 
   try {
   const mode = document.querySelector('input[name="vantage-mode"]:checked').value;
@@ -1732,6 +1735,7 @@ async function pollOnce() {
     });
   }
 
+  if (activeRevision !== refreshRevision) return;
   updateSkimmerCount(
     skimmerCount,
     mode === 'grid',
@@ -1761,18 +1765,27 @@ function startPolling() {
   isRunning = true;
   setStatus('Auto polling started.', 'ok');
   saveSettings();
-  pollOnce();
+  pollOnce(refreshRevision);
   pollTimer = setInterval(() => pollOnce(), POLL_MS);
+}
+
+function hardResetVantageData() {
+  meters.forEach(m => m.reset());
+  skimmerCount = 0;
+  updateSkimmerCount(0, currentVantageState().mode === 'grid', 0, [], []);
+  refreshUI(createModeQualityCube());
 }
 
 function scheduleRefresh(delayMs = 150) {
   if (!isRunning) return;
+  refreshRevision++;
+  const revision = refreshRevision;
+  hardResetVantageData();
+  setStatus('Refreshing vantage data...', 'warn');
   if (refreshDebounceTimer) clearTimeout(refreshDebounceTimer);
   refreshDebounceTimer = setTimeout(async () => {
     refreshDebounceTimer = null;
-    meters.forEach(m => m.reset());
-    skimmerCount = 0;
-    await pollOnce();
+    await pollOnce(revision);
   }, delayMs);
 }
 
