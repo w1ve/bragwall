@@ -909,7 +909,7 @@ async function parseAudioQuery(query = {}, headers = {}, clientIp = null) {
   const radiusMiles = unit === 'km' ? radius * 0.621371 : radius;
   const toRegions = parseToRegions(query.to || query.destination || 'all');
   const bands = parseBandSelection(query.band, query.bands);
-  const lang = normalizeLanguageCode(query.lang || query.language || headers['accept-language'] || 'en');
+  const lang = 'en'; // Always English — never inherit browser accept-language
   const utc = String(query.utc || utcTimeLabel()).trim();
 
   // IP geo-detect country & local time for accurate greeting
@@ -1302,21 +1302,22 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
   const now = new Date();
   const utcDateSpoken = `${MONTH_NAMES[now.getUTCMonth()]} ${ORDINALS(now.getUTCDate())}, ${now.getUTCFullYear()}`;
 
-  lines.push(`${greeting}, this is a custom H F Signals dot live Radio Conditions report for ${utcSpoken} U T C, ${utcDateSpoken}.`);
+  lines.push(`${greeting}. H F Signals dot live propagation report, ${utcSpoken} U T C, ${utcDateSpoken}.`);
 
   // Solar / geomagnetic conditions (omitted if params.includeSolar === false)
   if (params.includeSolar !== false) {
     const { sfi, ssn, a: aIdx, k: kIdx, wind, bz } = solar;
-    if (sfi != null)  lines.push(`The current Solar Flux Index is ${sfi}.`);
-    if (ssn != null)  lines.push(`The current Smoothed Sunspot Number is ${ssn}.`);
-    if (aIdx != null && kIdx != null) lines.push(`The A index is ${aIdx} and the K index is ${kIdx}.`);
-    else if (aIdx != null) lines.push(`The A index is ${aIdx}.`);
-    else if (kIdx != null) lines.push(`The K index is ${kIdx}.`);
-    if (wind != null) lines.push(`The solar wind is ${wind} kilometers per second.`);
+    const solarParts = [];
+    if (sfi != null)  solarParts.push(`Solar Flux ${sfi}`);
+    if (ssn != null)  solarParts.push(`Sunspot Number ${ssn}`);
+    if (aIdx != null) solarParts.push(`A index ${aIdx}`);
+    if (kIdx != null) solarParts.push(`K index ${kIdx}`);
+    if (wind != null) solarParts.push(`Solar wind ${wind} kilometers per second`);
     if (bz != null) {
       const polarity = bz < 0 ? 'negative' : 'positive';
-      lines.push(`The B Z, or north-south orientation of the Interplanetary Magnetic Field, is ${polarity} with a value of ${Math.abs(bz)} nanotesla.`);
+      solarParts.push(`B Z ${polarity} ${Math.abs(bz)} nanotesla`);
     }
+    if (solarParts.length) lines.push(solarParts.join('. ') + '.');
   }
 
   // Vantage point sentence
@@ -1324,11 +1325,11 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
     const radiusNum = Math.round(params.radius);
     const unitWord = params.unit === 'km' ? 'kilometer' : 'mile';
     const unitPlural = radiusNum === 1 ? unitWord : unitWord + 's';
-    const spokenPlace = params.gridPlaceName ? `, ${params.gridPlaceName},` : '';
-    lines.push(`From the vantage point of a ${radiusNum}-${unitPlural} radius around Maidenhead grid ${pronounceGrid(params.grid)}${spokenPlace}.`);
+    const spokenPlace = params.gridPlaceName ? `, ${params.gridPlaceName}` : '';
+    lines.push(`Vantage point: ${radiusNum} ${unitPlural} around grid ${pronounceGrid(params.grid)}${spokenPlace}.`);
   } else {
     const regionName = REGION_NAME_BY_KEY[params.fromRegion] || params.fromRegion;
-    lines.push(`From the vantage point of ${regionName}.`);
+    lines.push(`Vantage point: ${regionName}.`);
   }
 
   // ── Helper: Oxford-comma list ──────────────────────────────────────────────
@@ -1364,7 +1365,7 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
       const regionIntro = isLocal ? `Locally, in ${srcName}` : `Signals from ${srcName}`;
       const snrParts = active.map((b, i) => {
         const prefix = (i === active.length - 1 && active.length > 1) ? 'and on' : 'on';
-        return `${prefix} ${bandLabelSpoken(b.band)}, ${spokenSnr(b.snr)} decibels`;
+        return `${prefix} ${bandLabelSpoken(b.band)}, ${spokenSnr(b.snr)}`;
       });
       lines.push(`${regionIntro}: ${snrParts.join('; ')}.`);
 
@@ -1389,8 +1390,7 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
   // Static attribution + W1VE outro is appended as a pre-rendered MP3 (see OUTRO_AUDIO_PATH).
   const skimmers = sourceStats.skimmers || 0;
   const ftxCount = sourceStats.ftxCount || 0;
-  lines.push(`Please note this is point-in-time data, and may differ from the H F Signals dot live view. ${skimmers} skimmers and ${ftxCount} F T x reports were used to create this report.`);
-  lines.push('Go to H F Signals dot live for the latest data.');
+  lines.push(`Point-in-time snapshot. ${skimmers} skimmers and ${ftxCount} F T x reports used. Visit H F Signals dot live for the latest.`);
 
   return lines.join(' ');
 }
@@ -1576,16 +1576,13 @@ function sendAudioFile(res, filePath, generated, lang) {
 }
 
 async function collectBandResultsPerRegion(params) {
-  // Returns { regionKey: { band: bandResult } } for every toRegion that has data
+  // Returns { regionKey: { band: bandResult } } for ALL toRegions (even silent ones)
   const results = {};
   for (const toRegion of params.toRegions) {
     const singleParams = { ...params, toRegions: [toRegion] };
     const bandState = await collectRbnBandResults(singleParams);
     augmentWithPskBandResults(singleParams, bandState);
-    const finalized = finalizeBandResults(singleParams, bandState);
-    // Only include this region if at least one band has a signal
-    const hasAny = Object.values(finalized).some(b => b && b.hasSignal);
-    if (hasAny) results[toRegion] = finalized;
+    results[toRegion] = finalizeBandResults(singleParams, bandState);
   }
   return results;
 }

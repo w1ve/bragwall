@@ -5,17 +5,19 @@ const REGIONS = [
   'E. North America',
   'C. North America',
   'W. North America',
+  'Caribbean',
   'South America',
   'Europe',
   'Africa',
   'Asia',
   'Oceania',
 ];
-const REGION_KEYS = ['ENA', 'CNA', 'WNA', 'SA', 'EU', 'AF', 'AS', 'OC'];
+const REGION_KEYS = ['ENA', 'CNA', 'WNA', 'CAR', 'SA', 'EU', 'AF', 'AS', 'OC'];
 const DESKTOP_REGION_TITLES = [
   'Eastern North America',
   'Central North America',
   'Western North America',
+  'Caribbean',
   'South America',
   'Europe',
   'Africa',
@@ -26,6 +28,7 @@ const DESKTOP_REGION_TITLE_LINES = [
   'Eastern\nNorth America',
   'Central\nNorth America',
   'Western\nNorth America',
+  'Caribbean',
   'South\nAmerica',
   'Europe',
   'Africa',
