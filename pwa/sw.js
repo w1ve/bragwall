@@ -1,4 +1,4 @@
-const CACHE = 'hfsignals-live-v19';
+const CACHE = 'hfsignals-live-v20';
 const ASSETS = [
   './',
   './index.html',
@@ -36,6 +36,7 @@ self.addEventListener('fetch', e => {
       url.pathname === '/rbn' ||
       url.pathname === '/solar' ||
       url.pathname === '/psk' ||
+      url.pathname.startsWith('/audio/') ||
       url.pathname.startsWith('/hamdb/')) {
     e.respondWith(fetch(e.request).catch(() => new Response('', { status: 503 })));
     return;

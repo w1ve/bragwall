@@ -3,6 +3,9 @@
 const http  = require('http');
 const https = require('https');
 const url   = require('url');
+const fs    = require('fs');
+const path  = require('path');
+const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3001;
 
@@ -16,6 +19,24 @@ const PSK_MODES     = (process.env.PSK_MODES || 'FT8')
   .map(s => s.trim().toUpperCase())
   .filter(Boolean);
 const PSK_COOLDOWN_MS = parseInt(process.env.PSK_COOLDOWN_MS || String(30 * 60 * 1000), 10);
+const SSB_SNR_THRESHOLD = parseFloat(process.env.SSB_SNR_THRESHOLD || '20');
+
+const AUDIO_CACHE_MS = parseInt(process.env.AUDIO_CACHE_MS || String(15 * 60 * 1000), 10);
+const AUDIO_CACHE_DIR = process.env.AUDIO_CACHE_DIR || '/tmp/hfsignals-audio-cache';
+const AUDIO_GRID_LOOKUP_LIMIT = parseInt(process.env.AUDIO_GRID_LOOKUP_LIMIT || '240', 10);
+const AUDIO_HAMDB_CACHE_MS = parseInt(process.env.AUDIO_HAMDB_CACHE_MS || String(24 * 60 * 60 * 1000), 10);
+const AUDIO_HAMDB_NEG_CACHE_MS = parseInt(process.env.AUDIO_HAMDB_NEG_CACHE_MS || String(3 * 60 * 60 * 1000), 10);
+
+const ASYNC_API_BASE = process.env.ASYNC_API_BASE || 'https://api.async.com';
+const ASYNC_API_KEY = process.env.ASYNC_API_KEY || '';
+const ASYNC_API_VERSION = process.env.ASYNC_API_VERSION || 'v1';
+const ASYNC_MODEL_ID = process.env.ASYNC_MODEL_ID || 'async_flash_v1.0';
+const ASYNC_VOICE_NAME = (process.env.ASYNC_VOICE_NAME || 'tucker').trim();
+const ASYNC_VOICE_ID = (process.env.ASYNC_VOICE_ID || '').trim();
+const ASYNC_MP3_SAMPLE_RATE = parseInt(process.env.ASYNC_MP3_SAMPLE_RATE || '44100', 10);
+const ASYNC_MP3_BIT_RATE = parseInt(process.env.ASYNC_MP3_BIT_RATE || '128000', 10);
+
+const AUDIO_SUPPORTED_TTS_LANGS = new Set(['en', 'fr', 'es', 'de', 'it', 'pt', 'ar', 'ru', 'ro', 'ja', 'he', 'hy', 'tr', 'hi', 'zh']);
 
 const spotMap = new Map();
 const REGION_KEYS = ['ENA', 'CNA', 'WNA', 'SA', 'EU', 'AF', 'AS', 'OC', 'CAR'];
@@ -137,6 +158,25 @@ let pskBlockedUntil  = 0;
 let pskLastError     = null;
 let pskCacheReports  = null;
 const MAX_PSK_REPORTS_RESPONSE = parseInt(process.env.PSK_MAX_REPORTS_RESPONSE || '8000', 10);
+const REGION_NAME_BY_KEY = {
+  ENA: 'Eastern North America',
+  CNA: 'Central North America',
+  WNA: 'Western North America',
+  CAR: 'Caribbean',
+  SA: 'South America',
+  EU: 'Europe',
+  AF: 'Africa',
+  AS: 'Asia',
+  OC: 'Oceania',
+};
+const BAND_LABELS = BANDS.map((b) => b.label);
+const BAND_LABEL_SET = new Set(BAND_LABELS);
+const REGION_KEY_SET = new Set(REGION_KEYS);
+
+const hamdbAudioCache = new Map();
+let asyncVoiceIdCache = ASYNC_VOICE_ID || null;
+let asyncVoiceLookupPromise = null;
+let audioCacheDirReady = false;
 
 function pruneSpots() {
   const cutoff = Date.now() - SPOT_KEEP_MS;
@@ -605,6 +645,627 @@ async function servePsk(res, query = {}) {
   }
 }
 
+function sendJson(res, status, obj) {
+  send(res, status, 'application/json', JSON.stringify(obj));
+}
+
+function safeUpper(v) {
+  return String(v || '').trim().toUpperCase();
+}
+
+function normalizeLanguageCode(raw) {
+  const source = String(raw || '').trim();
+  if (!source) return 'en';
+  const first = source.split(',')[0].trim();
+  const primary = first.split('-')[0].toLowerCase();
+  if (!primary) return 'en';
+  return primary;
+}
+
+function normalizeRegionKey(raw) {
+  const u = safeUpper(raw);
+  if (!u) return null;
+  if (REGION_KEY_SET.has(u)) return u;
+  if (u === 'NA') return 'ENA';
+  return null;
+}
+
+function parseToRegions(raw) {
+  const u = safeUpper(raw);
+  if (!u || u === 'ALL' || u === '*') return REGION_KEYS.slice();
+  const out = [];
+  const seen = new Set();
+  for (const part of u.split(/[,\s]+/g).filter(Boolean)) {
+    const key = normalizeRegionKey(part);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out.length ? out : REGION_KEYS.slice();
+}
+
+function parseBandSelection(rawBand, rawBands) {
+  const value = String(rawBands || rawBand || '').trim();
+  if (!value || /^all$/i.test(value)) return BAND_LABELS.slice();
+  const out = [];
+  const seen = new Set();
+  for (const p of value.split(/[,\s]+/g).filter(Boolean)) {
+    const band = p.toLowerCase().endsWith('m') ? p.toLowerCase() : `${p.toLowerCase()}m`;
+    if (!BAND_LABEL_SET.has(band) || seen.has(band)) continue;
+    seen.add(band);
+    out.push(band);
+  }
+  return out.length ? out : BAND_LABELS.slice();
+}
+
+function sanitizeGrid(raw) {
+  const g = String(raw || '').trim().toUpperCase();
+  if (!/^[A-R]{2}[0-9]{2}([A-X]{2})?$/.test(g)) return '';
+  return g.slice(0, 4);
+}
+
+function parseBoolean(raw) {
+  const v = String(raw || '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+function parsePositive(raw, fallback) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return n;
+}
+
+function utcTimeLabel() {
+  const d = new Date();
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+function pickTimeOfDay(raw, utcLabel) {
+  const v = String(raw || '').trim().toLowerCase();
+  if (v === 'morning' || v === 'afternoon' || v === 'evening') return v;
+  let hh = 12;
+  if (typeof utcLabel === 'string' && /^\d{2}:\d{2}$/.test(utcLabel)) hh = Number(utcLabel.slice(0, 2));
+  if (hh < 12) return 'morning';
+  if (hh < 18) return 'afternoon';
+  return 'evening';
+}
+
+function greetingForTimeOfDay(tod) {
+  if (tod === 'morning') return 'Good Morning';
+  if (tod === 'afternoon') return 'Good Afternoon';
+  return 'Good Evening';
+}
+
+function regionName(key) {
+  return REGION_NAME_BY_KEY[key] || key;
+}
+
+function snrToSUnit(snr) {
+  if (!Number.isFinite(snr)) return 'S0';
+  if (snr < 1) return 'S0';
+  if (snr < 5) return 'S1';
+  if (snr < 9) return 'S2';
+  if (snr < 13) return 'S3';
+  if (snr < 17) return 'S4';
+  if (snr < 21) return 'S5';
+  if (snr < 25) return 'S6';
+  if (snr < 31) return 'S7';
+  if (snr < 37) return 'S8';
+  if (snr < 43) return 'S9';
+  if (snr < 53) return 'S9+10';
+  if (snr < 63) return 'S9+20';
+  return 'S9+30';
+}
+
+function ftxSnrToRbnScale(ftxSnr) {
+  if (!Number.isFinite(ftxSnr)) return null;
+  const minDb = -20;
+  const maxDb = 20;
+  const frac = Math.max(0, Math.min((ftxSnr - minDb) / (maxDb - minDb), 1));
+  return 2 + frac * 20;
+}
+
+async function ensureAudioCacheDir() {
+  if (audioCacheDirReady) return;
+  await fs.promises.mkdir(AUDIO_CACHE_DIR, { recursive: true });
+  audioCacheDirReady = true;
+}
+
+function stableAudioParamKey(params) {
+  const obj = {
+    mode: params.mode,
+    fromRegion: params.fromRegion || null,
+    grid: params.grid || null,
+    radius: params.radius || null,
+    unit: params.unit || 'mi',
+    toRegions: params.toRegions.slice().sort(),
+    bands: params.bands.slice(),
+    lang: params.lang,
+    timeOfDay: params.timeOfDay,
+    ssb: !!params.ssb,
+  };
+  return JSON.stringify(obj);
+}
+
+function hashText(text) {
+  return crypto.createHash('sha1').update(text).digest('hex');
+}
+
+function bucketForNow(msWindow) {
+  return Math.floor(Date.now() / msWindow);
+}
+
+async function deleteMatchingAudio(prefix) {
+  try {
+    const files = await fs.promises.readdir(AUDIO_CACHE_DIR);
+    await Promise.all(
+      files
+        .filter((f) => f.startsWith(prefix))
+        .map((f) => fs.promises.unlink(path.join(AUDIO_CACHE_DIR, f)).catch(() => {}))
+    );
+  } catch {}
+}
+
+function outputLanguage(ttsLang) {
+  if (!ttsLang || !AUDIO_SUPPORTED_TTS_LANGS.has(ttsLang)) return 'en';
+  return ttsLang;
+}
+
+function bandResultTemplate() {
+  return {
+    rbnSnrValues: [],
+    rbnModes: new Set(),
+    ftxSnrValues: [],
+  };
+}
+
+function parseAudioQuery(query = {}, headers = {}) {
+  const modeFromQuery = String(query.mode || '').trim().toLowerCase();
+  const mode = modeFromQuery === 'grid' ? 'grid' : 'region';
+  const fromRegion = normalizeRegionKey(query.from || query.region || query.source || 'ENA') || 'ENA';
+  const grid = sanitizeGrid(query.grid || query.sourceGrid || '');
+  const unit = String(query.unit || 'mi').toLowerCase() === 'km' ? 'km' : 'mi';
+  const radius = parsePositive(query.radius || query.range, unit === 'km' ? 500 : 500);
+  const radiusMiles = unit === 'km' ? radius * 0.621371 : radius;
+  const toRegions = parseToRegions(query.to || query.destination || 'all');
+  const bands = parseBandSelection(query.band, query.bands);
+  const lang = normalizeLanguageCode(query.lang || query.language || headers['accept-language'] || 'en');
+  const utc = String(query.utc || utcTimeLabel()).trim();
+  const timeOfDay = pickTimeOfDay(query.timeOfDay || query.tod, utc);
+  const ssb = parseBoolean(query.ssb || query.includeSsb || query.ssbChecked);
+  return {
+    mode,
+    fromRegion,
+    grid,
+    unit,
+    radius,
+    radiusMiles,
+    toRegions,
+    bands,
+    lang,
+    utc,
+    timeOfDay,
+    ssb,
+  };
+}
+
+async function resolveSpotterLatLonAudio(call) {
+  const upper = safeUpper(call).split('/')[0];
+  if (!upper || !CALLSIGN_RE.test(upper)) return null;
+  const cached = hamdbAudioCache.get(upper);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) return cached.latLon;
+  try {
+    const raw = await fetchRaw(`${HAMDB_BASE}${upper}/json`, 8000);
+    const data = JSON.parse(raw);
+    const cs = data?.hamdb?.callsign || null;
+    let latLon = null;
+    if (cs) {
+      if (cs.grid) {
+        const ll = gridToLatLon(String(cs.grid).trim().toUpperCase());
+        if (ll) latLon = ll;
+      }
+      if (!latLon) {
+        const lat = parseFloat(cs.lat);
+        const lon = parseFloat(cs.lon);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) latLon = { lat, lon };
+      }
+    }
+    hamdbAudioCache.set(upper, {
+      latLon,
+      expiresAt: now + (latLon ? AUDIO_HAMDB_CACHE_MS : AUDIO_HAMDB_NEG_CACHE_MS),
+    });
+    return latLon;
+  } catch {
+    hamdbAudioCache.set(upper, { latLon: null, expiresAt: now + AUDIO_HAMDB_NEG_CACHE_MS });
+    return null;
+  }
+}
+
+async function ensurePskForAudio() {
+  if (pskCacheData && (Date.now() - pskCacheFetched) < PSK_CACHE_MS) return;
+  if (!pskFetchPromise) {
+    pskFetchPromise = (async () => {
+      const modeFetches = await Promise.allSettled(PSK_MODES.map(fetchPskMode));
+      const reports = [];
+      for (const mr of modeFetches) {
+        if (mr.status === 'fulfilled') reports.push(...mr.value);
+      }
+      if (reports.length === 0) throw new Error('no_psk_reports');
+      pskCacheData = foldPskReports(reports);
+      pskCacheReports = compactPskReports(reports);
+      pskCacheFetched = Date.now();
+      pskLastError = null;
+      pskBlockedUntil = 0;
+      return pskCacheData;
+    })().finally(() => { pskFetchPromise = null; });
+  }
+  try {
+    await pskFetchPromise;
+  } catch {
+    // Keep stale cache fallback behavior.
+  }
+}
+
+async function collectRbnBandResults(params) {
+  const bandState = {};
+  for (const b of params.bands) bandState[b] = bandResultTemplate();
+
+  const gridLL = params.mode === 'grid' ? gridToLatLon(params.grid) : null;
+  const spotterKeys = new Set();
+  if (params.mode === 'grid') {
+    for (const s of spotMap.values()) {
+      for (const spotter of Object.keys(s.lsn || {})) {
+        spotterKeys.add(spotter);
+        if (spotterKeys.size >= AUDIO_GRID_LOOKUP_LIMIT) break;
+      }
+      if (spotterKeys.size >= AUDIO_GRID_LOOKUP_LIMIT) break;
+    }
+  }
+  const spotterLL = {};
+  if (params.mode === 'grid' && gridLL) {
+    await Promise.all(Array.from(spotterKeys).map(async (spotter) => {
+      const ll = await resolveSpotterLatLonAudio(spotter);
+      if (ll) spotterLL[spotter] = ll;
+    }));
+  }
+
+  for (const [dxCall, spot] of spotMap) {
+    const band = bandForFrequencyKhz(spot.freq);
+    if (!band || !bandState[band]) continue;
+    const toRegion = classifyCallsignRegion(dxCall);
+    if (!toRegion || !params.toRegions.includes(toRegion)) continue;
+    for (const [spotter, snr] of Object.entries(spot.lsn || {})) {
+      let sourceOk = false;
+      if (params.mode === 'region') {
+        sourceOk = classifyCallsignRegion(spotter) === params.fromRegion;
+      } else if (gridLL) {
+        const ll = spotterLL[spotter];
+        if (ll) sourceOk = distanceMiles(gridLL.lat, gridLL.lon, ll.lat, ll.lon) <= params.radiusMiles;
+      }
+      if (!sourceOk) continue;
+      const nSNR = Number(snr);
+      if (!Number.isFinite(nSNR)) continue;
+      bandState[band].rbnSnrValues.push(nSNR);
+      bandState[band].rbnModes.add(safeUpper(spot.mode));
+    }
+  }
+
+  return bandState;
+}
+
+function augmentWithPskBandResults(params, bandState) {
+  if (!pskCacheData) return;
+  if (params.mode === 'region') {
+    for (const toRegion of params.toRegions) {
+      for (const band of params.bands) {
+        const entry = pskCacheData?.[params.fromRegion]?.[toRegion]?.[band];
+        if (!entry || !Number.isFinite(entry.snr)) continue;
+        bandState[band].ftxSnrValues.push(entry.snr);
+      }
+    }
+    return;
+  }
+
+  const gridLL = gridToLatLon(params.grid);
+  if (!gridLL || !Array.isArray(pskCacheReports)) return;
+  for (const r of pskCacheReports) {
+    const freqKhz = Number(r.freq) >= 100000 ? Number(r.freq) / 1000 : Number(r.freq);
+    const band = bandForFrequencyKhz(freqKhz);
+    if (!band || !bandState[band]) continue;
+    const rxLL = gridToLatLon(String(r.rxGrid || '').toUpperCase().slice(0, 4));
+    if (!rxLL) continue;
+    if (distanceMiles(gridLL.lat, gridLL.lon, rxLL.lat, rxLL.lon) > params.radiusMiles) continue;
+    const toRegion = classifyCallsignRegion(r.txCall) || (() => {
+      const txLL = gridToLatLon(String(r.txGrid || '').toUpperCase().slice(0, 4));
+      return txLL ? regionFromLatLon(txLL.lat, txLL.lon) : null;
+    })();
+    if (!toRegion || !params.toRegions.includes(toRegion)) continue;
+    const snr = Number(r.snr);
+    if (!Number.isFinite(snr)) continue;
+    bandState[band].ftxSnrValues.push(snr + 7.0);
+  }
+}
+
+function finalizeBandResults(params, bandState) {
+  const out = {};
+  for (const band of params.bands) {
+    const b = bandState[band] || bandResultTemplate();
+    const rbnSnr = median(b.rbnSnrValues);
+    const ftxSnr = median(b.ftxSnrValues);
+    const ftxScaled = ftxSnrToRbnScale(ftxSnr);
+    let combined = null;
+    if (Number.isFinite(rbnSnr) && Number.isFinite(ftxScaled)) combined = (rbnSnr * 0.85) + (ftxScaled * 0.15);
+    else if (Number.isFinite(rbnSnr)) combined = rbnSnr;
+    else if (Number.isFinite(ftxScaled)) combined = ftxScaled;
+    const hasSignal = Number.isFinite(combined);
+    const modes = new Set(Array.from(b.rbnModes || []));
+    if (Number.isFinite(ftxSnr)) {
+      modes.add('FT8');
+      modes.add('FT4');
+    }
+    out[band] = {
+      hasSignal,
+      snr: hasSignal ? Math.round(combined * 10) / 10 : null,
+      sUnit: hasSignal ? snrToSUnit(combined) : null,
+      cwRttyFtx: hasSignal && (modes.has('CW') || modes.has('RTTY') || modes.has('FT8') || modes.has('FT4')),
+      ssbOk: !!params.ssb && hasSignal && combined >= SSB_SNR_THRESHOLD,
+    };
+  }
+  return out;
+}
+
+function buildAudioReportText(params, bandResults) {
+  const greeting = greetingForTimeOfDay(params.timeOfDay);
+  const sourceText = params.mode === 'grid'
+    ? `${params.grid} with a ${params.radius} ${params.unit} radius`
+    : regionName(params.fromRegion);
+
+  const lines = [];
+  lines.push(`${greeting}, this is your ${params.utc} UTC signal levels report from hfsignals.live.`);
+  lines.push(`Here are the current signal levels from ${sourceText}.`);
+
+  const noSignal = [];
+  const withSignal = [];
+  for (const band of params.bands) {
+    const b = bandResults[band];
+    if (!b || !b.hasSignal) noSignal.push(band);
+    else withSignal.push({ band, ...b });
+  }
+  if (noSignal.length) lines.push(`${noSignal.join(', ')} report no signals.`);
+  for (const b of withSignal) {
+    lines.push(`${b.band} signal levels are ${b.sUnit}.`);
+    if (b.cwRttyFtx) lines.push('CW, RTTY and FT4/8 QSOs are possible.');
+    if (b.ssbOk) lines.push('Propagation will support SSB QSOs.');
+  }
+  lines.push('Check hfsignals.info for the latest information.');
+  return lines.join(' ');
+}
+
+function requestText(method, targetUrl, bodyText, extraHeaders = {}, timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    const parsed = url.parse(targetUrl);
+    const client = parsed.protocol === 'http:' ? http : https;
+    const headers = { 'User-Agent': 'hfsignals-audio/1.0', ...extraHeaders };
+    if (bodyText != null && !Object.prototype.hasOwnProperty.call(headers, 'Content-Length')) {
+      headers['Content-Length'] = Buffer.byteLength(bodyText);
+    }
+    const req = client.request(
+      {
+        protocol: parsed.protocol,
+        hostname: parsed.hostname,
+        port: parsed.port,
+        path: parsed.path,
+        method,
+        headers,
+        timeout: timeoutMs,
+      },
+      (upstream) => {
+        const chunks = [];
+        upstream.on('data', (c) => chunks.push(c));
+        upstream.on('end', () => {
+          resolve({
+            statusCode: upstream.statusCode || 0,
+            headers: upstream.headers || {},
+            bodyText: Buffer.concat(chunks).toString('utf8'),
+          });
+        });
+      }
+    );
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.on('error', reject);
+    if (bodyText != null) req.write(bodyText);
+    req.end();
+  });
+}
+
+async function translateTextIfNeeded(sourceText, lang) {
+  const target = outputLanguage(lang);
+  if (target === 'en') return sourceText;
+  try {
+    const trUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(sourceText)}`;
+    const raw = await fetchRaw(trUrl, 12000, { 'User-Agent': 'hfsignals-audio/1.0' });
+    const parsed = JSON.parse(raw);
+    const text = Array.isArray(parsed?.[0]) ? parsed[0].map((row) => String(row?.[0] || '')).join('') : '';
+    if (text && text.trim()) return text.trim();
+  } catch {}
+  return sourceText;
+}
+
+async function listAsyncVoices(afterCursor = '') {
+  const payload = { limit: 100, model_id: ASYNC_MODEL_ID };
+  if (afterCursor) payload.after = afterCursor;
+  const rsp = await requestText(
+    'POST',
+    `${ASYNC_API_BASE.replace(/\/+$/, '')}/voices`,
+    JSON.stringify(payload),
+    {
+      'x-api-key': ASYNC_API_KEY,
+      'version': ASYNC_API_VERSION,
+      'Content-Type': 'application/json',
+    },
+    15000
+  );
+  if (rsp.statusCode !== 200) {
+    throw new Error(`voice_list_${rsp.statusCode}`);
+  }
+  return JSON.parse(rsp.bodyText);
+}
+
+async function resolveAsyncVoiceId() {
+  if (asyncVoiceIdCache) return asyncVoiceIdCache;
+  if (!ASYNC_API_KEY) throw new Error('ASYNC_API_KEY not configured');
+  if (asyncVoiceLookupPromise) return asyncVoiceLookupPromise;
+  asyncVoiceLookupPromise = (async () => {
+    const wanted = ASYNC_VOICE_NAME.toLowerCase();
+    let cursor = '';
+    for (let i = 0; i < 30; i++) {
+      const page = await listAsyncVoices(cursor);
+      const voices = Array.isArray(page?.voices) ? page.voices : [];
+      const exact = voices.find((v) => String(v?.name || '').trim().toLowerCase() === wanted);
+      const partial = voices.find((v) => String(v?.name || '').trim().toLowerCase().includes(wanted));
+      const match = exact || partial;
+      if (match?.voice_id) {
+        asyncVoiceIdCache = String(match.voice_id);
+        return asyncVoiceIdCache;
+      }
+      const next = String(page?.next_cursor || '').trim();
+      if (!next || next === cursor) break;
+      cursor = next;
+    }
+    throw new Error(`voice_not_found:${ASYNC_VOICE_NAME}`);
+  })().finally(() => { asyncVoiceLookupPromise = null; });
+  return asyncVoiceLookupPromise;
+}
+
+async function streamAsyncTtsToFile(transcript, lang, outPath) {
+  const voiceId = await resolveAsyncVoiceId();
+  const ttsLang = outputLanguage(lang);
+  const payload = {
+    model_id: ASYNC_MODEL_ID,
+    transcript,
+    voice: { mode: 'id', id: voiceId },
+    output_format: {
+      container: 'mp3',
+      sample_rate: Math.max(8000, Math.min(48000, ASYNC_MP3_SAMPLE_RATE)),
+      bit_rate: Math.max(32000, Math.min(320000, ASYNC_MP3_BIT_RATE)),
+    },
+  };
+  if (ttsLang !== 'en') payload.language = ttsLang;
+
+  const targetUrl = `${ASYNC_API_BASE.replace(/\/+$/, '')}/text_to_speech/streaming`;
+  const parsed = url.parse(targetUrl);
+  const bodyText = JSON.stringify(payload);
+  const tmpPath = `${outPath}.tmp-${Date.now()}`;
+  const ws = fs.createWriteStream(tmpPath);
+  await new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        protocol: parsed.protocol,
+        hostname: parsed.hostname,
+        port: parsed.port,
+        path: parsed.path,
+        method: 'POST',
+        timeout: 30000,
+        headers: {
+          'x-api-key': ASYNC_API_KEY,
+          'version': ASYNC_API_VERSION,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(bodyText),
+        },
+      },
+      (upstream) => {
+        if ((upstream.statusCode || 0) !== 200) {
+          const chunks = [];
+          upstream.on('data', (c) => chunks.push(c));
+          upstream.on('end', () => {
+            ws.destroy();
+            fs.promises.unlink(tmpPath).catch(() => {});
+            reject(new Error(`tts_${upstream.statusCode}:${Buffer.concat(chunks).toString('utf8').slice(0, 300)}`));
+          });
+          return;
+        }
+        upstream.pipe(ws);
+      }
+    );
+    req.on('timeout', () => { req.destroy(); });
+    req.on('error', (e) => {
+      ws.destroy();
+      fs.promises.unlink(tmpPath).catch(() => {});
+      reject(e);
+    });
+    ws.on('finish', resolve);
+    ws.on('error', (e) => {
+      fs.promises.unlink(tmpPath).catch(() => {});
+      reject(e);
+    });
+    req.end(bodyText);
+  });
+  await fs.promises.rename(tmpPath, outPath);
+}
+
+function sendAudioFile(res, filePath, generated, lang) {
+  fs.promises.stat(filePath).then((st) => {
+    res.writeHead(200, {
+      ...CORS,
+      'Content-Type': 'audio/mpeg',
+      'Content-Length': st.size,
+      'Cache-Control': 'public, max-age=60',
+      'X-HFSIGNALS-Audio': generated ? 'generated' : 'cached',
+      'X-HFSIGNALS-Language': outputLanguage(lang),
+    });
+    fs.createReadStream(filePath).pipe(res);
+  }).catch(() => {
+    sendJson(res, 500, { error: 'audio_file_missing' });
+  });
+}
+
+async function serveAudioPropReport(req, res, query = {}) {
+  if (!ASYNC_API_KEY) {
+    sendJson(res, 503, { error: 'audio_unavailable', reason: 'ASYNC_API_KEY missing' });
+    return;
+  }
+  const params = parseAudioQuery(query, req.headers || {});
+  if (params.mode === 'grid' && !params.grid) {
+    sendJson(res, 400, { error: 'invalid_grid', message: 'grid mode requires valid 4-char grid parameter' });
+    return;
+  }
+
+  await ensureAudioCacheDir();
+  await ensurePskForAudio();
+  const bandState = await collectRbnBandResults(params);
+  augmentWithPskBandResults(params, bandState);
+  const bandResults = finalizeBandResults(params, bandState);
+  const englishText = buildAudioReportText(params, bandResults);
+  const translatedText = await translateTextIfNeeded(englishText, params.lang);
+  const transcript = translatedText && translatedText.trim() ? translatedText : englishText;
+
+  const keyHash = hashText(stableAudioParamKey(params));
+  const bucket = bucketForNow(AUDIO_CACHE_MS);
+  const prefix = `${keyHash}-`;
+  const fileName = `${prefix}${bucket}.mp3`;
+  const outPath = path.join(AUDIO_CACHE_DIR, fileName);
+
+  try {
+    const st = await fs.promises.stat(outPath);
+    if ((Date.now() - st.mtimeMs) < AUDIO_CACHE_MS) {
+      sendAudioFile(res, outPath, false, params.lang);
+      return;
+    }
+  } catch {}
+
+  try {
+    await deleteMatchingAudio(prefix);
+    await streamAsyncTtsToFile(transcript, params.lang, outPath);
+    sendAudioFile(res, outPath, true, params.lang);
+  } catch (e) {
+    console.error('[audio] generation failed:', e?.message || e);
+    sendJson(res, 502, { error: 'audio_generation_failed', reason: String(e?.message || e || 'unknown') });
+  }
+}
+
 async function serveSolar(res) {
   const [wwvR, cycleR, plasmaR, magR] = await Promise.allSettled([
     fetchRaw('https://services.swpc.noaa.gov/text/wwv.txt'),
@@ -698,6 +1359,13 @@ const server = http.createServer(async (req, res) => {
   }
   if (parts[0] === 'psk' && parts.length === 1) {
     try { await servePsk(res, parsed.query || {}); } catch (_) { send(res, 502, 'text/plain', 'PSK fetch error'); }
+    return;
+  }
+  if (parts[0] === 'audio' && parts[1] === 'propreport') {
+    try { await serveAudioPropReport(req, res, parsed.query || {}); } catch (e) {
+      console.error('[audio] propreport error:', e?.message || e);
+      sendJson(res, 502, { error: 'audio_propreport_error', reason: String(e?.message || e || 'unknown') });
+    }
     return;
   }
   if (parts[0] === 'health') {

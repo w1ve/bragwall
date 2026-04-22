@@ -480,6 +480,55 @@ body.theme-cb .theme-btn.active {
   margin-top: 10px;
 }
 
+.vantage-audio-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.vantage-audio-btn {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  border: 1px solid rgba(0,212,170,0.35);
+  border-radius: 999px;
+  padding: 5px 11px;
+  background: var(--bg3);
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+.vantage-audio-btn:hover {
+  background: rgba(0,212,170,0.10);
+  border-color: var(--accent);
+}
+
+.vantage-audio-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.vantage-audio-btn.loading {
+  opacity: 0.75;
+}
+
+.vantage-audio-btn.playing {
+  background: var(--accent2);
+  color: #ffffff;
+  border-color: var(--accent);
+}
+
+body.theme-cb .vantage-audio-btn {
+  color: #0b1126;
+  background: var(--accent2);
+  border-color: #7adfff;
+}
+
+body.theme-cb .vantage-audio-btn.playing {
+  color: #0b1126;
+}
+
 .vantage-count-label {
   cursor: help;
 }
@@ -607,6 +656,8 @@ body.theme-cb .theme-btn.active {
   .vantage-display-label { font-size: 13px; }
   .vantage-display-value { font-size: 14px; }
   .vantage-skimmer-wrap { margin-top: 8px; }
+  .vantage-audio-wrap { margin-top: 6px; }
+  .vantage-audio-btn { font-size: 11px; padding: 4px 9px; }
   .vantage-map-canvas { height: 120px; margin-top: 6px; }
   .desktop-main { display: block; padding: 0 10px; }
   #sw-bar {

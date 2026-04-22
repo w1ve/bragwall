@@ -82,6 +82,19 @@ let meterPalette = {
 let pskByRegion = {};
 let pskMeta = { age: null, cached: false, stale: false };
 let latestModeQualityByBand = createModeQualityCube();
+let audioPlayback = null;
+let audioRequestInFlight = false;
+let audioElement = null;
+let audioAbortCtrl = null;
+let suppressAudioStopOnVantageUpdate = false;
+
+function normalizeLanguageCode(raw) {
+  const source = String(raw || '').trim();
+  if (!source) return 'en';
+  const first = source.split(',')[0].trim();
+  const primary = first.split('-')[0].toLowerCase();
+  return primary || 'en';
+}
 
 const VANTAGE_GRID_COLOR = '#ffffff';
 const SOURCE_REGION_NAMES = [
@@ -1952,6 +1965,143 @@ function currentVantageState() {
   };
 }
 
+function buildAudioUrl(vantage = currentVantageState()) {
+  const q = new URLSearchParams();
+  const lang = normalizeLanguageCode(navigator?.languages?.[0] || navigator?.language || 'en');
+  q.set('lang', lang);
+  q.set('to', 'all');
+  q.set('bands', 'all');
+  q.set('utc', new Date().toISOString().slice(11, 16));
+  if (vantage.mode === 'grid') {
+    if (!vantage.grid || !isValidGrid(vantage.grid)) return null;
+    q.set('mode', 'grid');
+    q.set('grid', vantage.grid.toUpperCase().slice(0, 4));
+    q.set('radius', String(vantage.radius || 500));
+    q.set('unit', String(vantage.unit || 'mi').toLowerCase());
+  } else {
+    q.set('mode', 'region');
+    const key = SOURCE_REGION_KEYS[vantage.regionIdx] || SOURCE_REGION_KEYS[0];
+    q.set('from', key);
+  }
+  return `/audio/propreport?${q.toString()}`;
+}
+
+function stopAudioPlayback() {
+  if (audioAbortCtrl) {
+    try { audioAbortCtrl.abort(); } catch {}
+    audioAbortCtrl = null;
+  }
+  if (audioElement) {
+    try { audioElement.pause(); } catch {}
+    audioElement.src = '';
+    audioElement = null;
+  }
+  if (audioPlayback && audioPlayback.url) {
+    try { URL.revokeObjectURL(audioPlayback.url); } catch {}
+  }
+  audioPlayback = null;
+  const btn = document.getElementById('vantage-audio-btn');
+  if (btn) {
+    btn.classList.remove('playing');
+    btn.classList.remove('loading');
+    btn.setAttribute('aria-pressed', 'false');
+    btn.setAttribute('aria-label', 'Play audio propagation report');
+    btn.title = 'Play audio propagation report';
+  }
+}
+
+function setAudioButtonState(state) {
+  const btn = document.getElementById('vantage-audio-btn');
+  if (!btn) return;
+  btn.classList.remove('playing', 'loading');
+  if (state === 'loading') {
+    btn.classList.add('loading');
+    btn.disabled = true;
+    btn.setAttribute('aria-pressed', 'false');
+    btn.setAttribute('aria-label', 'Generating audio propagation report');
+    btn.title = 'Generating audio propagation report...';
+    return;
+  }
+  if (state === 'playing') {
+    btn.classList.add('playing');
+    btn.disabled = false;
+    btn.setAttribute('aria-pressed', 'true');
+    btn.setAttribute('aria-label', 'Stop audio propagation report');
+    btn.title = 'Stop audio propagation report';
+    return;
+  }
+  btn.disabled = false;
+  btn.setAttribute('aria-pressed', 'false');
+  btn.setAttribute('aria-label', 'Play audio propagation report');
+  btn.title = 'Play audio propagation report';
+}
+
+async function requestAudioReport() {
+  if (audioRequestInFlight) return;
+  const btn = document.getElementById('vantage-audio-btn');
+  if (!btn) return;
+  if (audioPlayback || (audioElement && !audioElement.paused)) {
+    stopAudioPlayback();
+    setStatus('Audio report stopped.', 'warn');
+    return;
+  }
+  const url = buildAudioUrl();
+  if (!url) {
+    setStatus('Enter a valid grid square before requesting audio report.', 'error');
+    return;
+  }
+  audioRequestInFlight = true;
+  setAudioButtonState('loading');
+  suppressAudioStopOnVantageUpdate = true;
+  setStatus('Generating audio propagation report...', 'warn');
+  const ctrl = new AbortController();
+  audioAbortCtrl = ctrl;
+  try {
+    const resp = await fetch(url, { signal: ctrl.signal });
+    if (!resp.ok) {
+      let details = '';
+      try {
+        const body = await resp.json();
+        details = body?.reason || body?.error || '';
+      } catch {}
+      throw new Error(`HTTP ${resp.status}${details ? ` (${details})` : ''}`);
+    }
+    const blob = await resp.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const audio = new Audio(objectUrl);
+    audioPlayback = { url: objectUrl };
+    audioElement = audio;
+    setAudioButtonState('playing');
+    audio.addEventListener('ended', () => {
+      stopAudioPlayback();
+      setStatus('Audio report completed.', 'ok');
+    });
+    audio.addEventListener('error', () => {
+      stopAudioPlayback();
+      setStatus('Audio playback failed.', 'error');
+    });
+    await audio.play();
+    setStatus('Playing audio propagation report.', 'ok');
+  } catch (e) {
+    if (e?.name !== 'AbortError') {
+      setStatus(`Audio report failed: ${e.message || 'unknown error'}`, 'error');
+    }
+    stopAudioPlayback();
+  } finally {
+    suppressAudioStopOnVantageUpdate = false;
+    audioRequestInFlight = false;
+    if (!audioPlayback && (!audioElement || audioElement.paused)) setAudioButtonState('idle');
+    audioAbortCtrl = null;
+  }
+}
+
+function wireAudioControls() {
+  const btn = document.getElementById('vantage-audio-btn');
+  if (!btn) return;
+  setAudioButtonState('idle');
+  btn.addEventListener('click', () => { requestAudioReport(); });
+}
+
 function vantagePointText() {
   const v = currentVantageState();
   if (v.mode === 'grid') {
@@ -1978,6 +2128,7 @@ function updateVantageDisplay() {
     if (v.mode === 'grid') drawGridVantageMap(canvas, v.grid, v.radiusMiles, v.radiusLabel);
     else drawRegionVantageMap(canvas, v.regionIdx);
   }
+  if (!suppressAudioStopOnVantageUpdate) stopAudioPlayback();
 }
 
 // ── Auto-update grid from GPS ─────────────────────────────────────────────────
@@ -2143,6 +2294,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (themeDarkBtn) themeDarkBtn.addEventListener('click', () => { applyTheme('dark'); saveSettings(); });
   if (themeLightBtn) themeLightBtn.addEventListener('click', () => { applyTheme('light'); saveSettings(); });
   if (themeCbBtn) themeCbBtn.addEventListener('click', () => { applyTheme('cb'); saveSettings(); });
+  wireAudioControls();
 
   if (!s.grid) autoDetect(); else autoDetect();
 
