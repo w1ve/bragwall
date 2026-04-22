@@ -1171,7 +1171,7 @@ function buildAudioReportText(params, bandResults) {
     const reportedModes = [];
     if (params.cwChecked  && b.modes && b.modes.has('CW'))   reportedModes.push('CW');
     if (params.rttyChecked && b.modes && b.modes.has('RTTY')) reportedModes.push('RTTY');
-    if (params.ftxChecked  && b.modes && (b.modes.has('FT8') || b.modes.has('FT4'))) reportedModes.push('FT8');
+    if (params.ftxChecked  && b.modes && (b.modes.has('FT8') || b.modes.has('FT4'))) reportedModes.push('FT eight or FT Four');
 
     if (reportedModes.length === 1) {
       lines.push(`${reportedModes[0]} spots have been reported.`);
