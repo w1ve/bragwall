@@ -1100,11 +1100,11 @@ function bandLabelSpoken(band) {
 }
 
 function spokenSnr(snr) {
-  // returns e.g. "plus 6 D B" or "minus 2 D B"
+  // returns e.g. "plus 6 decibels" or "minus 2 decibels"
   if (!Number.isFinite(snr)) return 'unknown';
   const db = Math.round(snr);
   const sign = db >= 0 ? 'plus' : 'minus';
-  return `${sign} ${Math.abs(db)} D B`;
+  return `${sign} ${Math.abs(db)} decibels`;
 }
 
 function pronounceGrid(grid) {
@@ -1674,6 +1674,24 @@ async function serveAudioPropReport(req, res, query = {}) {
   }
 
   await ensureAudioCacheDir();
+
+  // --- CACHE CHECK (before any expensive work) ---
+  const keyHash = hashText(stableAudioParamKey(params));
+  const bucket  = bucketForNow(AUDIO_CACHE_MS);
+  const prefix  = `${keyHash}-`;
+  const fileName = `${prefix}${bucket}.mp3`;
+  const outPath  = path.join(AUDIO_CACHE_DIR, fileName);
+
+  try {
+    const st = await fs.promises.stat(outPath);
+    if ((Date.now() - st.mtimeMs) < AUDIO_CACHE_MS) {
+      console.log('[audio] cache hit:', fileName);
+      sendAudioFile(res, outPath, false, params.lang);
+      return;
+    }
+  } catch {}
+  // --- END CACHE CHECK ---
+
   await ensurePskForAudio();
   if (params.mode === 'grid' && params.grid) {
     const geo = await reverseGeoGrid(params.grid);
@@ -1684,20 +1702,6 @@ async function serveAudioPropReport(req, res, query = {}) {
   const englishText = buildAudioReportText(params, regionResults, solar);
   const translatedText = await translateTextIfNeeded(englishText, params.lang);
   const transcript = translatedText && translatedText.trim() ? translatedText : englishText;
-
-  const keyHash = hashText(stableAudioParamKey(params));
-  const bucket = bucketForNow(AUDIO_CACHE_MS);
-  const prefix = `${keyHash}-`;
-  const fileName = `${prefix}${bucket}.mp3`;
-  const outPath = path.join(AUDIO_CACHE_DIR, fileName);
-
-  try {
-    const st = await fs.promises.stat(outPath);
-    if ((Date.now() - st.mtimeMs) < AUDIO_CACHE_MS) {
-      sendAudioFile(res, outPath, false, params.lang);
-      return;
-    }
-  } catch {}
 
   try {
     await deleteMatchingAudio(prefix);

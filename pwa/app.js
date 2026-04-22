@@ -2052,13 +2052,11 @@ function setAudioButtonState(state) {
   if (state === 'loading') {
     btn.classList.add('loading');
     btn.disabled = true;
-    document.body.classList.add('audio-loading');
     btn.setAttribute('aria-pressed', 'false');
     btn.setAttribute('aria-label', 'Generating audio propagation report');
     btn.title = 'Generating audio propagation report...';
     return;
   }
-  document.body.classList.remove('audio-loading');
   if (state === 'playing') {
     btn.classList.add('playing');
     btn.disabled = false;
@@ -2101,13 +2099,30 @@ async function requestAudioReport() {
   let waitingAudio = null;
   let waitingObjectUrl = null;
 
+  // Poll for waiting audio (server generates it once at startup; may not be ready instantly)
+  const fetchWaitingAudio = async () => {
+    const MAX_WAIT_MS = 10000;
+    const POLL_MS = 600;
+    const deadline = Date.now() + MAX_WAIT_MS;
+    while (Date.now() < deadline && audioAbortCtrl === ctrl) {
+      try {
+        const r = await fetch('/audio/waiting');
+        if (r.ok) {
+          const blob = await r.blob();
+          return URL.createObjectURL(blob);
+        }
+      } catch {}
+      await new Promise(res => setTimeout(res, POLL_MS));
+    }
+    return null;
+  };
+
   try {
-    // Fetch waiting audio (fast, cached) and real report in parallel
-    const waitResp = await fetch('/audio/waiting');
-    if (waitResp.ok && audioAbortCtrl === ctrl) {
-      const waitBlob = await waitResp.blob();
-      waitingObjectUrl = URL.createObjectURL(waitBlob);
-      waitingAudio = new Audio(waitingObjectUrl);
+    // Try to get waiting audio; plays while report generates
+    const waitUrl = await fetchWaitingAudio();
+    if (waitUrl && audioAbortCtrl === ctrl) {
+      waitingObjectUrl = waitUrl;
+      waitingAudio = new Audio(waitUrl);
       audioElement = waitingAudio;
       setAudioButtonState('playing');
       waitingAudio.play().catch(() => {});

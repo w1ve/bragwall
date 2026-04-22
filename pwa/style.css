@@ -513,13 +513,29 @@ body.theme-cb .theme-btn.active {
   cursor: wait;
 }
 
-.vantage-audio-btn.loading {
-  opacity: 0.75;
-  cursor: wait;
+/* Audio button SVG icon parts */
+.audio-btn-icon {
+  display: block;
+  pointer-events: none;
 }
-body.audio-loading,
-body.audio-loading * {
-  cursor: wait !important;
+.icon-spinner-ring {
+  display: none;
+}
+
+/* Loading state: hide speaker, show spinning ring */
+@keyframes audio-spin {
+  to { transform: rotate(360deg); transform-origin: center; }
+}
+.vantage-audio-btn.loading .icon-speaker {
+  display: none;
+}
+.vantage-audio-btn.loading .icon-spinner-ring {
+  display: block;
+  animation: audio-spin 0.9s linear infinite;
+  transform-origin: 12px 12px;
+}
+.vantage-audio-btn.loading {
+  opacity: 0.85;
 }
 
 .vantage-audio-btn.playing {

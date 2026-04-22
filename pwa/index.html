@@ -114,7 +114,16 @@
         <span id="skimmer-count" class="sr-only">0 skimmers / 0 FTx reports</span>
       </div>
       <div class="vantage-audio-wrap">
-        <button type="button" id="vantage-audio-btn" class="vantage-audio-btn" aria-label="Play propagation audio report" title="Audio Radio Conditions Report (updated every 15 minutes)">🔊</button>
+        <button type="button" id="vantage-audio-btn" class="vantage-audio-btn" aria-label="Play propagation audio report" title="Audio Radio Conditions Report (updated every 15 minutes)">
+          <svg class="audio-btn-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <!-- Speaker icon -->
+            <g class="icon-speaker">
+              <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+            </g>
+            <!-- Spinner ring (hidden unless .loading) -->
+            <circle class="icon-spinner-ring" cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="42 14"/>
+          </svg>
+        </button>
         <audio id="vantage-audio-player" preload="none"></audio>
       </div>
     </div>
