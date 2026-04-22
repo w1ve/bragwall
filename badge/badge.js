@@ -4,10 +4,12 @@
  * HFSignals.live Badge API
  *
  * Endpoints:
- *   GET /badge/region?from=NA&to=EU&band=20m&theme=dark|light&size=small|full
- *   GET /badge/grid?grid=FN42&radius=500&to=EU&band=20m&theme=dark|light&size=small|full
- *   GET /hfsignals/region?from=NA&to=EU&band=20m&theme=dark|light&size=small|full
- *   GET /hfsignals/grid?grid=FN42&radius=500&to=EU&band=20m&theme=dark|light&size=small|full
+ *   GET /badges/region?from=NA&to=EU&band=20m&theme=dark|light&size=small|full|large
+ *   GET /badges/grid?grid=FN42&radius=500&to=EU&band=20m&theme=dark|light&size=small|full|large
+ *   GET /badge/region?from=NA&to=EU&band=20m&theme=dark|light&size=small|full|large
+ *   GET /badge/grid?grid=FN42&radius=500&to=EU&band=20m&theme=dark|light&size=small|full|large
+ *   GET /hfsignals/region?from=NA&to=EU&band=20m&theme=dark|light&size=small|full|large
+ *   GET /hfsignals/grid?grid=FN42&radius=500&to=EU&band=20m&theme=dark|light&size=small|full|large
  *
  * Returns a PNG image suitable for embedding in web pages via <img> tags.
  *
@@ -135,6 +137,13 @@ const REGION_ALIASES = {
 const SSB_THRESHOLD = 20.0;
 const MAX_SNR       = 50.0;
 const CARIBBEAN_CENTER = { lat: 17.0, lon: -72.0, radiusMiles: 950 };
+const SIZE_ALIASES = {
+  small: 'small',
+  sm: 'small',
+  full: 'full',
+  large: 'full',
+  lg: 'full',
+};
 
 // ── Callsign → region classifier (simplified) ─────────────────────────────────
 function classifyCall(call) {
@@ -898,17 +907,23 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const isRegionPath = pathname === '/badge/region' || pathname === '/hfsignals/region';
-  const isGridPath   = pathname === '/badge/grid' || pathname === '/hfsignals/grid';
+  const isRegionPath = pathname === '/badges/region' || pathname === '/badge/region' || pathname === '/hfsignals/region';
+  const isGridPath   = pathname === '/badges/grid' || pathname === '/badge/grid' || pathname === '/hfsignals/grid';
   if (!isRegionPath && !isGridPath) {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
-    res.end('Not found. Use /badge/region, /badge/grid, /hfsignals/region, or /hfsignals/grid');
+    res.end('Not found. Use /badges/region, /badges/grid, /badge/region, /badge/grid, /hfsignals/region, or /hfsignals/grid');
     return;
   }
 
   // Parse common params
   const theme  = (q.theme === 'light') ? 'light' : 'dark';
-  const size   = (q.size  === 'full')  ? 'full'  : 'small';
+  const sizeRaw = String(q.size || 'small').toLowerCase();
+  const size = SIZE_ALIASES[sizeRaw];
+  if (!size) {
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end('Invalid size. Use: small, full, or large');
+    return;
+  }
   const bandRaw = (q.band || '20m').toLowerCase();
   const isAllBands = bandRaw === 'all';
   const band   = isAllBands ? 'all' : bandRaw.replace('m','') + 'm';
