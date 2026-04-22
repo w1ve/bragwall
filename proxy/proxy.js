@@ -1236,7 +1236,7 @@ function buildAudioReportText(params, bandResults, solar = {}) {
   } else {
     for (const [toRegion, bandData] of regionEntries) {
       const regionName = REGION_NAME_BY_KEY[toRegion] || toRegion;
-      lines.push(`Looking at ${regionName}.`);
+      lines.push(`Looking at ${regionName},`);
 
       const withSignal = [];
       const noSignal = [];
@@ -1278,7 +1278,7 @@ function buildAudioReportText(params, bandResults, solar = {}) {
   }
 
   lines.push('Go to H F Signals dot live for the latest data.');
-  lines.push('Thank you for access to free data sources from N O A A, The Reverse Beacon Network, and PSKReporter dot info for their real-time data feeds.');
+  lines.push('We depend on free data sources for this site. Thanks to N O A A, the Reverse Beacon Network, and PSKReporter for their free real-time data.');
 
   return lines.join(' ');
 }
