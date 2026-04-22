@@ -890,8 +890,15 @@ function bandResultTemplate() {
 async function parseAudioQuery(query = {}, headers = {}, clientIp = null) {
   const modeFromQuery = String(query.mode || '').trim().toLowerCase();
   const mode = modeFromQuery === 'grid' ? 'grid' : 'region';
-  const fromRegion = normalizeRegionKey(query.from || query.region || query.source || 'ENA') || 'ENA';
   const grid = sanitizeGrid(query.grid || query.sourceGrid || '');
+  // For grid mode, derive fromRegion from the grid square's lat/lon (same as UI)
+  let fromRegion;
+  if (mode === 'grid' && grid) {
+    const gll = gridToLatLon(grid);
+    fromRegion = (gll ? regionFromLatLon(gll.lat, gll.lon) : null) || 'ENA';
+  } else {
+    fromRegion = normalizeRegionKey(query.from || query.region || query.source || 'ENA') || 'ENA';
+  }
   const unit = String(query.unit || 'mi').toLowerCase() === 'km' ? 'km' : 'mi';
   const radius = parsePositive(query.radius || query.range, unit === 'km' ? 500 : 500);
   const radiusMiles = unit === 'km' ? radius * 0.621371 : radius;
@@ -1039,37 +1046,16 @@ async function collectRbnBandResults(params) {
 }
 
 function augmentWithPskBandResults(params, bandState) {
-  // Region mode uses pskCacheData; grid mode uses pskCacheReports.
-  // Do NOT short-circuit grid mode just because pskCacheData is null.
-  if (params.mode === 'region') {
-    if (!pskCacheData) return;
-    for (const toRegion of params.toRegions) {
-      for (const band of params.bands) {
-        const entry = pskCacheData?.[params.fromRegion]?.[toRegion]?.[band];
-        if (!entry || !Number.isFinite(entry.snr)) continue;
-        bandState[band].ftxSnrValues.push(entry.snr);
-      }
+  // Both region and grid modes use pskCacheData[fromRegion][toRegion][band].
+  // fromRegion is derived from grid lat/lon in parseAudioQuery for grid mode,
+  // so this lookup is identical to what the UI does.
+  if (!pskCacheData) return;
+  for (const toRegion of params.toRegions) {
+    for (const band of params.bands) {
+      const entry = pskCacheData?.[params.fromRegion]?.[toRegion]?.[band];
+      if (!entry || !Number.isFinite(entry.snr)) continue;
+      bandState[band].ftxSnrValues.push(entry.snr);
     }
-    return;
-  }
-
-  const gridLL = gridToLatLon(params.grid);
-  if (!gridLL || !Array.isArray(pskCacheReports)) return;
-  for (const r of pskCacheReports) {
-    const freqKhz = Number(r.freq) >= 100000 ? Number(r.freq) / 1000 : Number(r.freq);
-    const band = bandForFrequencyKhz(freqKhz);
-    if (!band || !bandState[band]) continue;
-    const rxLL = gridToLatLon(String(r.rxGrid || '').toUpperCase().slice(0, 4));
-    if (!rxLL) continue;
-    if (distanceMiles(gridLL.lat, gridLL.lon, rxLL.lat, rxLL.lon) > params.radiusMiles) continue;
-    const toRegion = classifyCallsignRegion(r.txCall) || (() => {
-      const txLL = gridToLatLon(String(r.txGrid || '').toUpperCase().slice(0, 4));
-      return txLL ? regionFromLatLon(txLL.lat, txLL.lon) : null;
-    })();
-    if (!toRegion || !params.toRegions.includes(toRegion)) continue;
-    const snr = Number(r.snr);
-    if (!Number.isFinite(snr)) continue;
-    bandState[band].ftxSnrValues.push(snr + 7.0);
   }
 }
 
@@ -1273,9 +1259,10 @@ function buildAudioReportText(params, bandResults, solar = {}) {
         }
       }
 
-      // Each no-signal band gets its own short line
-      for (const band of noSignal) {
-        lines.push(`On ${bandLabelSpoken(band)}, no signals are reported.`);
+      if (noSignal.length && withSignal.length > 0) {
+        lines.push(`No other bands are reporting signals.`);
+      } else if (noSignal.length && withSignal.length === 0) {
+        lines.push(`No signals are reported.`);
       }
     }
   }
