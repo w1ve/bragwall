@@ -2096,43 +2096,27 @@ async function requestAudioReport() {
   let waitingAudio = null;
   let waitingObjectUrl = null;
 
-  // Fetch waiting audio (cached on server, should respond in <200ms once generated)
-  // Returns an object-URL string or null
-  const fetchWaitingAudio = async () => {
+  // Kick off the real report fetch immediately (runs in background)
+  const reportFetchPromise = fetch(url, { signal: ctrl.signal });
+
+  // Also kick off waiting audio fetch immediately — play it right away,
+  // don't race: the waiting message should always play while the report generates.
+  (async () => {
     try {
       const r = await fetch('/audio/waiting');
-      if (!r.ok) return null;
+      if (!r.ok) return;
       const blob = await r.blob();
-      return URL.createObjectURL(blob);
-    } catch { return null; }
-  };
-
-  // Sentinel so Promise.race can tell which resolved
-  const REPORT_TAG  = Symbol('report');
-  const WAITING_TAG = Symbol('waiting');
-
-  // Both fetches run in parallel from the start
-  const reportFetchPromise  = fetch(url, { signal: ctrl.signal });
-  const waitingFetchPromise = fetchWaitingAudio().then(u => ({ tag: WAITING_TAG, url: u }));
-  const reportTagged        = reportFetchPromise.then(r  => ({ tag: REPORT_TAG,  resp: r  }));
+      if (audioAbortCtrl !== ctrl) return; // user already cancelled
+      waitingObjectUrl = URL.createObjectURL(blob);
+      waitingAudio = new Audio(waitingObjectUrl);
+      audioElement = waitingAudio;
+      setAudioButtonState('playing');
+      waitingAudio.play().catch(() => {});
+    } catch {}
+  })();
 
   try {
-    // See what arrives first: waiting audio or the actual report
-    const first = await Promise.race([waitingFetchPromise, reportTagged]);
-
-    if (first.tag === WAITING_TAG) {
-      // Waiting audio came back first — play it, then wait for report
-      if (first.url && audioAbortCtrl === ctrl) {
-        waitingObjectUrl = first.url;
-        waitingAudio = new Audio(first.url);
-        audioElement  = waitingAudio;
-        setAudioButtonState('playing');
-        waitingAudio.play().catch(() => {});
-      }
-    }
-    // (if report came first, skip waiting audio entirely — no need)
-
-    // Now await the real report response (may already be resolved)
+    // Await the real report response
     const resp = await reportFetchPromise;
     if (!resp.ok) {
       let details = '';

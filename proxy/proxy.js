@@ -1331,53 +1331,57 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
     lines.push(`From the vantage point of ${regionName}.`);
   }
 
-  // Iterate each region that has signal data
-  const regionEntries = Object.entries(bandResults); // { regionKey: { band: result } }
+  // ── Helper: Oxford-comma list ──────────────────────────────────────────────
+  function oxfordList(items) {
+    if (items.length === 1) return items[0];
+    if (items.length === 2) return `${items[0]} and ${items[1]}`;
+    return items.slice(0, -1).join(', ') + `, and ${items[items.length - 1]}`;
+  }
+
+  // ── Per-region signal block ─────────────────────────────────────────────────
+  // bandResults keys are the *source* regions (toRegion in data model).
+  // params.fromRegion is the vantage point (receiver).
+  const regionEntries = Object.entries(bandResults);
   if (regionEntries.length === 0) {
     lines.push('No signal data was found for any region.');
   } else {
     for (const [toRegion, bandData] of regionEntries) {
-      const regionName = REGION_NAME_BY_KEY[toRegion] || toRegion;
-      lines.push(`Looking at ${regionName},`);
+      const srcName = REGION_NAME_BY_KEY[toRegion] || toRegion;
+      const isLocal = toRegion === params.fromRegion;
 
-      const withSignal = [];
-      const noSignal = [];
-      for (const band of params.bands) {
-        const b = bandData[band];
-        if (!b || !b.hasSignal) noSignal.push(band);
-        else withSignal.push({ band, ...b });
+      const active = params.bands
+        .map(band => ({ band, ...(bandData[band] || {}) }))
+        .filter(b => b.hasSignal);
+
+      // Region has no signals — always report it
+      if (active.length === 0) {
+        lines.push(`There are no signals spotted from ${srcName}.`);
+        continue;
       }
 
-      for (const b of withSignal) {
-        const bandSpoken = bandLabelSpoken(b.band);
-        lines.push(`On ${bandSpoken}, the average signal to noise ratio is ${spokenSnr(b.snr)}.`);
+      // ── SNR run-on: "Locally, in Eastern North America: on 20m, +26 dB; and on 15m, +18 dB."
+      //               "Signals from Europe: on 20m, +21 dB; and on 15m, +14 dB."
+      const regionIntro = isLocal ? `Locally, in ${srcName}` : `Signals from ${srcName}`;
+      const snrParts = active.map((b, i) => {
+        const prefix = (i === active.length - 1 && active.length > 1) ? 'and on' : 'on';
+        return `${prefix} ${bandLabelSpoken(b.band)}, ${spokenSnr(b.snr)} decibels`;
+      });
+      lines.push(`${regionIntro}: ${snrParts.join('; ')}.`);
 
-        // Build mode list from actual data — digital first, then CW, then RTTY
-        const reportedModes = [];
-        if (b.modes && (b.modes.has('FT8') || b.modes.has('FT4'))) reportedModes.push('digital');
-        if (b.modes && b.modes.has('CW'))   reportedModes.push('CW');
-        if (b.modes && b.modes.has('RTTY')) reportedModes.push('RTTY');
+      // ── Mode summaries — only mention modes that actually have spots ──────
+      const cwBands   = active.filter(b => b.modes?.has('CW'))
+                              .map(b => bandLabelSpoken(b.band));
+      const digBands  = active.filter(b => b.modes?.has('FT8') || b.modes?.has('FT4'))
+                              .map(b => bandLabelSpoken(b.band));
+      const rttyBands = active.filter(b => b.modes?.has('RTTY'))
+                              .map(b => bandLabelSpoken(b.band));
+      const ssbBands  = active.filter(b => b.ssbOk)
+                              .map(b => bandLabelSpoken(b.band));
 
-        if (reportedModes.length === 1) {
-          lines.push(`${reportedModes[0]} spots have been reported.`);
-        } else if (reportedModes.length === 2) {
-          lines.push(`${reportedModes[0]} and ${reportedModes[1]} spots have been reported.`);
-        } else if (reportedModes.length >= 3) {
-          const last = reportedModes[reportedModes.length - 1];
-          const rest = reportedModes.slice(0, -1).join(', ');
-          lines.push(`${rest}, and ${last} spots have been reported.`);
-        }
-
-        if (b.ssbOk) {
-          lines.push(`Signal levels will support SSB contacts.`);
-        }
-      }
-
-      if (noSignal.length && withSignal.length > 0) {
-        lines.push(`No other bands are reporting signals.`);
-      } else if (noSignal.length && withSignal.length === 0) {
-        lines.push(`No signals are reported.`);
-      }
+      if (cwBands.length)   lines.push(`CW spots are reported on ${oxfordList(cwBands)}.`);
+      if (digBands.length)  lines.push(`Digital spots are reported on ${oxfordList(digBands)}.`);
+      if (rttyBands.length) lines.push(`RTTY spots are reported on ${oxfordList(rttyBands)}.`);
+      if (ssbBands.length)  lines.push(`SSB is supported on ${oxfordList(ssbBands)}.`);
     }
   }
 
@@ -1619,58 +1623,13 @@ async function ensureWaitingAudio() {
   if (waitingAudioGenerating) return;
   try {
     await fs.promises.access(WAITING_AUDIO_PATH);
-    return; // already exists
+    return; // already exists — nothing to do
   } catch {}
   if (!ASYNC_API_KEY) return;
   waitingAudioGenerating = true;
   try {
     await ensureAudioCacheDir();
-    const voiceId = await resolveAsyncVoiceId();
-    const payload = {
-      model_id: ASYNC_MODEL_ID,
-      transcript: 'One moment while we generate your custom report.',
-      voice: { mode: 'id', id: voiceId },
-      output_format: {
-        container: 'mp3',
-        sample_rate: Math.max(8000, Math.min(48000, ASYNC_MP3_SAMPLE_RATE)),
-        bit_rate:    Math.max(32000, Math.min(320000, ASYNC_MP3_BIT_RATE)),
-      },
-    };
-    const targetUrl = `${ASYNC_API_BASE.replace(/\/+$/, '')}/text_to_speech/streaming`;
-    const parsed2 = url.parse(targetUrl);
-    const bodyText = JSON.stringify(payload);
-    const tmpPath = `${WAITING_AUDIO_PATH}.tmp`;
-    const ws2 = fs.createWriteStream(tmpPath);
-    await new Promise((resolve, reject) => {
-      const req2 = https.request({
-        protocol: parsed2.protocol,
-        hostname: parsed2.hostname,
-        port: parsed2.port,
-        path: parsed2.path,
-        method: 'POST',
-        timeout: 30000,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${ASYNC_API_KEY}`,
-          'Content-Length': Buffer.byteLength(bodyText),
-        },
-      }, (upstream) => {
-        if (upstream.statusCode !== 200) {
-          reject(new Error(`async.com waiting audio HTTP ${upstream.statusCode}`));
-          return;
-        }
-        upstream.pipe(ws2);
-        upstream.on('end', resolve);
-        upstream.on('error', reject);
-      });
-      req2.on('error', reject);
-      req2.on('timeout', () => { req2.destroy(); reject(new Error('waiting audio timeout')); });
-      req2.write(bodyText);
-      req2.end();
-    });
-    ws2.end();
-    await new Promise(r => ws2.on('close', r));
-    await fs.promises.rename(tmpPath, WAITING_AUDIO_PATH);
+    await streamAsyncTtsToFile('One moment while we generate your custom report.', 'en', WAITING_AUDIO_PATH);
     console.log('[audio] waiting message generated');
   } catch (e) {
     console.warn('[audio] waiting message generation failed:', e?.message || e);
