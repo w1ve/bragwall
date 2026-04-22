@@ -1103,11 +1103,30 @@ function bandLabelSpoken(band) {
 }
 
 function spokenSnr(snr) {
-  // returns e.g. "plus 6 D B Signal to Noise Ratio" or "minus 2 D B Signal to Noise Ratio"
+  // returns e.g. "plus 6 D B" or "minus 2 D B"
   if (!Number.isFinite(snr)) return 'unknown';
   const db = Math.round(snr);
   const sign = db >= 0 ? 'plus' : 'minus';
-  return `${sign} ${Math.abs(db)} D B Signal to Noise Ratio`;
+  return `${sign} ${Math.abs(db)} D B`;
+}
+
+function pronounceGrid(grid) {
+  // "FN34" => "F N Three Four", "EM72" => "E M Seven Two"
+  if (!grid || grid.length < 4) return grid || 'unknown';
+  const g = grid.toUpperCase().slice(0, 6);
+  const NATO = {
+    A:'Alpha', B:'Bravo', C:'Charlie', D:'Delta', E:'Echo', F:'Foxtrot',
+    G:'Golf', H:'Hotel', I:'India', J:'Juliet', K:'Kilo', L:'Lima',
+    M:'Mike', N:'November', O:'Oscar', P:'Papa', Q:'Quebec', R:'Romeo',
+    S:'Sierra', T:'Tango', U:'Uniform', V:'Victor', W:'Whiskey',
+    X:'X-ray', Y:'Yankee', Z:'Zulu'
+  };
+  const DIGITS = ['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine'];
+  return g.split('').map(ch => {
+    if (ch >= 'A' && ch <= 'Z') return NATO[ch] || ch;
+    if (ch >= '0' && ch <= '9') return DIGITS[parseInt(ch, 10)];
+    return ch;
+  }).join(' ');
 }
 
 function joinBands(bandList) {
@@ -1124,6 +1143,17 @@ function buildAudioReportText(params, bandResults) {
 
   const lines = [];
   lines.push(`${greeting}, this is the H F Signals dot live Radio Conditions report for ${utcSpoken} U T C.`);
+
+  // Vantage point sentence
+  if (params.mode === 'grid' && params.grid) {
+    const radiusNum = Math.round(params.radius);
+    const unitWord = params.unit === 'km' ? 'kilometer' : 'mile';
+    const unitPlural = radiusNum === 1 ? unitWord : unitWord + 's';
+    lines.push(`From the vantage point of a ${radiusNum}-${unitPlural} radius around Maidenhead grid ${pronounceGrid(params.grid)}.`);
+  } else {
+    const regionName = REGION_NAME_BY_KEY[params.fromRegion] || params.fromRegion;
+    lines.push(`From the vantage point of ${regionName}.`);
+  }
 
   const noSignal = [];
   const withSignal = [];
@@ -1538,5 +1568,6 @@ server.listen(PORT, '0.0.0.0', () => {
 
 process.on('SIGTERM', () => server.close(() => process.exit(0)));
 process.on('SIGINT',  () => server.close(() => process.exit(0)));
+
 
 
