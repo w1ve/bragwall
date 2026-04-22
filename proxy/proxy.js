@@ -1356,7 +1356,7 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
     lines.push(`Vantage point: ${REGION_NAME_BY_KEY[params.fromRegion] || params.fromRegion}.`);
   }
 
-  // ── Helper ───────────────────────────────────────────────────────────────
+  // ── Helpers ──────────────────────────────────────────────────────────────
   function oxfordList(items) {
     if (!items.length) return '';
     if (items.length === 1) return items[0];
@@ -1364,28 +1364,20 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
     return items.slice(0, -1).join(', ') + `, and ${items[items.length - 1]}`;
   }
 
-  // short SNR: "plus 28" — unit established by intro phrase
-  function spokenSnrShort(snr) {
-    if (!Number.isFinite(snr)) return 'unknown';
+  // Short SNR for the per-band rundown: "plus 18" — no "decibels", unit stated by intro.
+  // Uses "X meters" prefix to avoid TTS misreading "160, plus 18" as "1600 plus 18".
+  function snrEntry(band, snr) {
+    if (!Number.isFinite(snr)) return `${bandLabelSpoken(band)} unknown`;
     const db = Math.round(snr);
-    return `${db >= 0 ? 'plus' : 'minus'} ${Math.abs(db)}`;
+    return `${bandLabelSpoken(band)} ${db >= 0 ? 'plus' : 'minus'} ${Math.abs(db)}`;
   }
 
-  // ── 4. Global strongest signal (once) ────────────────────────────────────
-  let bestSnr = -Infinity, bestBand = null;
-  for (const region of REGION_KEYS) {
-    const bandData = bandResults[region];
-    if (!bandData) continue;
-    for (const band of params.bands) {
-      const b = bandData[band];
-      if (b?.hasSignal && b.snr > bestSnr) { bestSnr = b.snr; bestBand = band; }
-    }
-  }
-  if (bestBand) {
-    lines.push(`Strongest signal ${spokenSnr(bestSnr)} on ${bandLabelSpoken(bestBand)}.`);
-  }
-
-  // ── 5. Per-region blocks in canonical order ───────────────────────────────
+  // ── 4. Per-region blocks in canonical order ───────────────────────────────
+  // Each active region gets:
+  //   "Signals from X." (omitted for local/vantage region)
+  //   "Strongest signal plus 28 decibels on 20 meters."   ← per-region strongest
+  //   "Signal to Noise Ratios on the bands: 80 meters plus 18, 40 meters plus 24, ..."
+  //   "CW, Digital, and SSB active."
   const silentRegions = [];
 
   for (const region of REGION_KEYS) {
@@ -1398,16 +1390,27 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
       continue;
     }
 
-    // Skip "Signals from X" for local/vantage region — already stated above
+    // "Signals from X." — skip for local/vantage region (already stated as vantage point)
     if (region !== params.fromRegion) {
       lines.push(`Signals from ${REGION_NAME_BY_KEY[region] || region}.`);
     }
 
-    // "Signal to Noise Ratios on the bands: 80, plus 18, 40, plus 24, ..."
-    const snrParts = activeBands.map(b => `${bandNumberOnly(b)}, ${spokenSnrShort(bandData[b].snr)}`);
+    // Per-region strongest band
+    let regionBestSnr = -Infinity, regionBestBand = null;
+    for (const band of activeBands) {
+      const s = bandData[band].snr;
+      if (Number.isFinite(s) && s > regionBestSnr) { regionBestSnr = s; regionBestBand = band; }
+    }
+    if (regionBestBand) {
+      lines.push(`Strongest signal ${spokenSnr(regionBestSnr)} on ${bandLabelSpoken(regionBestBand)}.`);
+    }
+
+    // "Signal to Noise Ratios on the bands: 80 meters plus 18, 40 meters plus 24, ..."
+    // Band label ("80 meters") prevents TTS from misreading "160, plus 18" as "1600 plus 18"
+    const snrParts = activeBands.map(b => snrEntry(b, bandData[b].snr));
     lines.push(`Signal to Noise Ratios on the bands: ${snrParts.join(', ')}.`);
 
-    // Modes — union across active bands for this region
+    // Modes — union across all active bands for this region
     const modeset = new Set();
     for (const band of activeBands) {
       const b = bandData[band];
@@ -1422,11 +1425,11 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
     if (modeLabels.length) lines.push(`${oxfordList(modeLabels)} active.`);
   }
 
-  // ── 6. Silent regions batched (once) ─────────────────────────────────────
+  // ── 5. Silent regions batched (once) ─────────────────────────────────────
   if (silentRegions.length === 1) lines.push(`No signals from ${silentRegions[0]}.`);
   else if (silentRegions.length > 1) lines.push(`No signals from ${oxfordList(silentRegions)}.`);
 
-  // ── 7. Closing (once) ────────────────────────────────────────────────────
+  // ── 6. Closing (once) ────────────────────────────────────────────────────
   const skimmers = sourceStats.skimmers || 0;
   const ftxCount = sourceStats.ftxCount || 0;
   lines.push(`${skimmers} skimmers, ${ftxCount} F T x reports. Visit H F Signals dot live for live data.`);
