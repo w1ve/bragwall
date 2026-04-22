@@ -190,22 +190,28 @@ function pruneSpots() {
 
 function addSpot(spotter, freq, dxCall, mode, snr) {
   const now = Date.now();
-  if (!spotMap.has(dxCall)) {
-    spotMap.set(dxCall, { freq, mode, firstSeen: now, lastSeen: now, lsn: {} });
+  const band = bandForFrequencyKhz(freq);
+  if (!band) return; // ignore out-of-band spots
+  const key = `${dxCall}|${band}`;
+  if (!spotMap.has(key)) {
+    spotMap.set(key, { freq, mode, dxCall, firstSeen: now, lastSeen: now, lsn: {} });
   }
-  const s = spotMap.get(dxCall);
+  const s = spotMap.get(key);
   s.lsn[spotter] = snr;
   s.lastSeen = now;
   s.freq = freq;
+  s.mode = mode;
 }
 
 function buildRbnResponse() {
   pruneSpots();
   const now = Date.now();
   const out = {};
-  for (const [dxCall, s] of spotMap) {
-    out[dxCall] = {
-      dxcall: dxCall,
+  for (const [, s] of spotMap) {
+    // Key includes band so each DX station can appear on multiple bands simultaneously.
+    const outKey = `${s.dxCall}|${bandForFrequencyKhz(s.freq)}`;
+    out[outKey] = {
+      dxcall: s.dxCall,
       freq:   s.freq.toFixed(1),
       mode:   s.mode,
       age:    Math.round((now - s.lastSeen) / 1000),
@@ -1032,11 +1038,11 @@ async function collectRbnBandResults(params) {
   }
 
   const spotAgeCutoff = Date.now() - 120_000; // match UI 120-second freshness window
-  for (const [dxCall, spot] of spotMap) {
+  for (const [, spot] of spotMap) {
     if (spot.lastSeen < spotAgeCutoff) continue; // skip stale spots, same as UI
     const band = bandForFrequencyKhz(spot.freq);
     if (!band || !bandState[band]) continue;
-    const toRegion = classifyCallsignRegion(dxCall);
+    const toRegion = classifyCallsignRegion(spot.dxCall);
     if (!toRegion || !params.toRegions.includes(toRegion)) continue;
     for (const [spotter, snr] of Object.entries(spot.lsn || {})) {
       let sourceOk = false;

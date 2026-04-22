@@ -1714,7 +1714,7 @@ async function pollOnce(revisionAtRequest = refreshRevision) {
     if (bi < 0) continue;
     totalSpots++;
 
-    const dxRegion = classifyCallsign(spotCall);
+    const dxRegion = classifyCallsign(spot.dxcall || spotCall);
 
     for (const [listenerCall, snrVal] of Object.entries(spot.lsn)) {
       const snr = parseFloat(snrVal);
