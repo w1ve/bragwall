@@ -917,10 +917,8 @@ async function parseAudioQuery(query = {}, headers = {}, clientIp = null) {
   const timeOfDay = pickTimeOfDay(query.timeOfDay || query.tod, utc, localHour);
 
   const ssb = parseBoolean(query.ssb || query.includeSsb || query.ssbChecked);
-  // Mode checkboxes from client (cw, rtty, ft8/ftx)
-  const cwChecked  = query.cw  !== undefined ? parseBoolean(query.cw)  : true;
-  const rttyChecked = query.rtty !== undefined ? parseBoolean(query.rtty) : true;
-  const ftxChecked = query.ftx !== undefined ? parseBoolean(query.ftx) : true;
+  // solar=0 suppresses the solar/geomagnetic block (useful for automated/API calls)
+  const includeSolar = query.solar !== undefined ? parseBoolean(query.solar) : true;
   return {
     mode,
     fromRegion,
@@ -934,6 +932,7 @@ async function parseAudioQuery(query = {}, headers = {}, clientIp = null) {
     utc,
     timeOfDay,
     ssb,
+    includeSolar,
     cwChecked,
     rttyChecked,
     ftxChecked,
@@ -1193,17 +1192,19 @@ function buildAudioReportText(params, bandResults, solar = {}) {
 
   lines.push(`${greeting}, this is the H F Signals dot live Radio Conditions report for ${utcSpoken} U T C, ${utcDateSpoken}.`);
 
-  // Solar / geomagnetic conditions
-  const { sfi, ssn, a: aIdx, k: kIdx, wind, bz } = solar;
-  if (sfi != null)  lines.push(`The current Solar Flux Index is ${sfi}.`);
-  if (ssn != null)  lines.push(`The current Smoothed Sunspot Number is ${ssn}.`);
-  if (aIdx != null && kIdx != null) lines.push(`The A index is ${aIdx} and the K index is ${kIdx}.`);
-  else if (aIdx != null) lines.push(`The A index is ${aIdx}.`);
-  else if (kIdx != null) lines.push(`The K index is ${kIdx}.`);
-  if (wind != null) lines.push(`The solar wind is ${wind} kilometers per second.`);
-  if (bz != null) {
-    const polarity = bz < 0 ? 'negative' : 'positive';
-    lines.push(`The B Z, or north-south orientation of the Interplanetary Magnetic Field, is ${polarity} with a value of ${Math.abs(bz)} nanotesla.`);
+  // Solar / geomagnetic conditions (omitted if params.includeSolar === false)
+  if (params.includeSolar !== false) {
+    const { sfi, ssn, a: aIdx, k: kIdx, wind, bz } = solar;
+    if (sfi != null)  lines.push(`The current Solar Flux Index is ${sfi}.`);
+    if (ssn != null)  lines.push(`The current Smoothed Sunspot Number is ${ssn}.`);
+    if (aIdx != null && kIdx != null) lines.push(`The A index is ${aIdx} and the K index is ${kIdx}.`);
+    else if (aIdx != null) lines.push(`The A index is ${aIdx}.`);
+    else if (kIdx != null) lines.push(`The K index is ${kIdx}.`);
+    if (wind != null) lines.push(`The solar wind is ${wind} kilometers per second.`);
+    if (bz != null) {
+      const polarity = bz < 0 ? 'negative' : 'positive';
+      lines.push(`The B Z, or north-south orientation of the Interplanetary Magnetic Field, is ${polarity} with a value of ${Math.abs(bz)} nanotesla.`);
+    }
   }
 
   // Vantage point sentence
@@ -1238,11 +1239,11 @@ function buildAudioReportText(params, bandResults, solar = {}) {
         const bandSpoken = bandLabelSpoken(b.band);
         lines.push(`On ${bandSpoken}, the average signal to noise ratio is ${spokenSnr(b.snr)}.`);
 
-        // Build mode list: FTx first, then CW, then RTTY
+        // Build mode list from actual data — FTx first, then CW, then RTTY
         const reportedModes = [];
-        if (params.ftxChecked  && b.modes && (b.modes.has('FT8') || b.modes.has('FT4'))) reportedModes.push('FT eight or FT Four');
-        if (params.cwChecked   && b.modes && b.modes.has('CW'))   reportedModes.push('CW');
-        if (params.rttyChecked && b.modes && b.modes.has('RTTY')) reportedModes.push('RTTY');
+        if (b.modes && (b.modes.has('FT8') || b.modes.has('FT4'))) reportedModes.push('FT eight or FT Four');
+        if (b.modes && b.modes.has('CW'))   reportedModes.push('CW');
+        if (b.modes && b.modes.has('RTTY')) reportedModes.push('RTTY');
 
         if (reportedModes.length === 1) {
           lines.push(`${reportedModes[0]} spots have been reported.`);
@@ -1631,10 +1632,10 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 200, { tooltip: audioTooltipText(resolvedLang), lang: outputLanguage(resolvedLang) });
     return;
   }
-  if (parts[0] === 'audio' && parts[1] === 'propreport') {
+  if (parts[0] === 'audio' && (parts[1] === 'propreport' || parts[1] === 'report')) {
     try { await serveAudioPropReport(req, res, parsed.query || {}); } catch (e) {
-      console.error('[audio] propreport error:', e?.message || e);
-      sendJson(res, 502, { error: 'audio_propreport_error', reason: String(e?.message || e || 'unknown') });
+      console.error('[audio] report error:', e?.message || e);
+      sendJson(res, 502, { error: 'audio_report_error', reason: String(e?.message || e || 'unknown') });
     }
     return;
   }
