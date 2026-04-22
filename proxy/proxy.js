@@ -819,6 +819,8 @@ async function ensureAudioCacheDir() {
 }
 
 function stableAudioParamKey(params) {
+  // NOTE: timeOfDay/utc/greeting are NOT included — they are cosmetic and must
+  // not bust the cache. The cache key is purely the signal-data parameters.
   const obj = {
     mode: params.mode,
     fromRegion: params.fromRegion || null,
@@ -828,7 +830,6 @@ function stableAudioParamKey(params) {
     toRegions: params.toRegions.slice().sort(),
     bands: params.bands.slice(),
     lang: params.lang,
-    timeOfDay: params.timeOfDay,
     ssb: !!params.ssb,
     cw: !!params.cwChecked,
     rtty: !!params.rttyChecked,

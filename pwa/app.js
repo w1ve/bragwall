@@ -2048,12 +2048,36 @@ function stopAudioPlayback() {
   }
 }
 
+// ── Audio countdown timer ──────────────────────────────────────────────────
+let _countdownTimer = null;
+
+function startCountdown(seconds) {
+  stopCountdown();
+  const el = document.getElementById('audio-countdown');
+  if (!el) return;
+  let remaining = seconds;
+  el.textContent = remaining;
+  _countdownTimer = setInterval(() => {
+    remaining = Math.max(0, remaining - 1);
+    el.textContent = remaining;
+    if (remaining <= 0) stopCountdown();
+  }, 1000);
+}
+
+function stopCountdown() {
+  if (_countdownTimer) { clearInterval(_countdownTimer); _countdownTimer = null; }
+  const el = document.getElementById('audio-countdown');
+  if (el) el.textContent = '';
+}
+
 function setAudioButtonState(state) {
   const btn = document.getElementById('vantage-audio-btn');
   if (!btn) return;
   btn.classList.remove('playing', 'loading');
+  stopCountdown(); // always clear countdown when state changes
   if (state === 'loading') {
     btn.classList.add('loading');
+    startCountdown(30); // 30-second countdown
     btn.disabled = true;
     btn.setAttribute('aria-pressed', 'false');
     btn.setAttribute('aria-label', 'Generating audio propagation report');
@@ -2113,7 +2137,8 @@ async function requestAudioReport() {
       waitingObjectUrl = URL.createObjectURL(blob);
       waitingAudio = new Audio(waitingObjectUrl);
       audioElement = waitingAudio;
-      setAudioButtonState('playing');
+      // Keep spinner+countdown running while waiting audio plays —
+      // do NOT transition to 'playing' state until the real report is ready
       waitingAudio.play().catch(() => {});
     } catch {}
   })();
