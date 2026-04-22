@@ -1137,12 +1137,83 @@ function joinBands(bandList) {
   return spoken.slice(0, -1).join(', ') + ', and ' + spoken[spoken.length - 1];
 }
 
-function buildAudioReportText(params, bandResults) {
+async function fetchSolarDataForAudio() {
+  try {
+    const [wwvR, cycleR, plasmaR, magR] = await Promise.allSettled([
+      fetchRaw('https://services.swpc.noaa.gov/text/wwv.txt'),
+      fetchRaw('https://services.swpc.noaa.gov/json/solar-cycle/observed-solar-cycle-indices.json'),
+      fetchRaw('https://services.swpc.noaa.gov/products/solar-wind/plasma-2-hour.json'),
+      fetchRaw('https://services.swpc.noaa.gov/json/rtsw/rtsw_mag_1m.json'),
+    ]);
+    const m = (re) => { const t = wwvR.status === 'fulfilled' ? wwvR.value : ''; const x = re.exec(t); return x ? x[1] : null; };
+    let sfi = m(/Solar flux\s+(\d+)/i) ? parseInt(m(/Solar flux\s+(\d+)/i)) : null;
+    let a   = m(/A index\s+(\d+)/i)    ? parseInt(m(/A index\s+(\d+)/i))    : null;
+    let k   = m(/K index\s+(\d+)/i)    ? parseInt(m(/K index\s+(\d+)/i))    : null;
+    let ssn = null;
+    if (cycleR.status === 'fulfilled') {
+      try {
+        const arr = JSON.parse(cycleR.value);
+        const last = Array.isArray(arr) ? arr[arr.length - 1] : null;
+        if (last) {
+          ssn = Math.round(parseFloat(last.ssn || last.observed_swpc_ssn));
+          if (!sfi && last['f10.7']) sfi = Math.round(parseFloat(last['f10.7']));
+        }
+      } catch {}
+    }
+    let wind = null;
+    if (plasmaR.status === 'fulfilled') {
+      try {
+        const rows = JSON.parse(plasmaR.value);
+        for (let i = rows.length - 1; i >= 1; i--) {
+          const v = parseFloat(rows[i][2]);
+          if (!isNaN(v) && v > 0) { wind = Math.round(v); break; }
+        }
+      } catch {}
+    }
+    let bz = null;
+    if (magR.status === 'fulfilled') {
+      try {
+        const arr = JSON.parse(magR.value);
+        for (let i = arr.length - 1; i >= 0; i--) {
+          const v = parseFloat(arr[i].bz_gsm);
+          if (!isNaN(v)) { bz = parseFloat(v.toFixed(1)); break; }
+        }
+      } catch {}
+    }
+    return { sfi, ssn, a, k, wind, bz };
+  } catch { return {}; }
+}
+
+function buildAudioReportText(params, bandResults, solar = {}) {
   const greeting = greetingForTimeOfDay(params.timeOfDay);
   const utcSpoken = pronounceUtc(params.utc);
 
   const lines = [];
-  lines.push(`${greeting}, this is the H F Signals dot live Radio Conditions report for ${utcSpoken} U T C.`);
+  // UTC date spoken e.g. "April 1st, 2026"
+  const MONTH_NAMES = ['January','February','March','April','May','June',
+    'July','August','September','October','November','December'];
+  const ORDINALS = (n) => {
+    const s = ['th','st','nd','rd'];
+    const v = n % 100;
+    return n + (s[(v-20)%10] || s[v] || s[0]);
+  };
+  const now = new Date();
+  const utcDateSpoken = `${MONTH_NAMES[now.getUTCMonth()]} ${ORDINALS(now.getUTCDate())}, ${now.getUTCFullYear()}`;
+
+  lines.push(`${greeting}, this is the H F Signals dot live Radio Conditions report for ${utcSpoken} U T C, ${utcDateSpoken}.`);
+
+  // Solar / geomagnetic conditions
+  const { sfi, ssn, a: aIdx, k: kIdx, wind, bz } = solar;
+  if (sfi != null)  lines.push(`The current Solar Flux Index is ${sfi}.`);
+  if (ssn != null)  lines.push(`The current Smoothed Sunspot Number is ${ssn}.`);
+  if (aIdx != null && kIdx != null) lines.push(`The A index is ${aIdx} and the K index is ${kIdx}.`);
+  else if (aIdx != null) lines.push(`The A index is ${aIdx}.`);
+  else if (kIdx != null) lines.push(`The K index is ${kIdx}.`);
+  if (wind != null) lines.push(`The solar wind is ${wind} kilometers per second.`);
+  if (bz != null) {
+    const polarity = bz < 0 ? 'negative' : 'positive';
+    lines.push(`The B Z, or north-south orientation of the Interplanetary Magnetic Field, is ${polarity} with a value of ${Math.abs(bz)} nanotesla.`);
+  }
 
   // Vantage point sentence
   if (params.mode === 'grid' && params.grid) {
@@ -1193,6 +1264,7 @@ function buildAudioReportText(params, bandResults) {
   }
 
   lines.push('Go to H F Signals dot live for the latest data.');
+  lines.push('Thank you for access to free data sources from N O A A, The Reverse Beacon Network, and PSKReporter dot info for their real-time data feeds.');
 
   return lines.join(' ');
 }
@@ -1395,7 +1467,8 @@ async function serveAudioPropReport(req, res, query = {}) {
   const bandState = await collectRbnBandResults(params);
   augmentWithPskBandResults(params, bandState);
   const bandResults = finalizeBandResults(params, bandState);
-  const englishText = buildAudioReportText(params, bandResults);
+  const solar = await fetchSolarDataForAudio();
+  const englishText = buildAudioReportText(params, bandResults, solar);
   const translatedText = await translateTextIfNeeded(englishText, params.lang);
   const transcript = translatedText && translatedText.trim() ? translatedText : englishText;
 
