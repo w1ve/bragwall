@@ -2052,11 +2052,13 @@ function setAudioButtonState(state) {
   if (state === 'loading') {
     btn.classList.add('loading');
     btn.disabled = true;
+    document.body.classList.add('audio-loading');
     btn.setAttribute('aria-pressed', 'false');
     btn.setAttribute('aria-label', 'Generating audio propagation report');
     btn.title = 'Generating audio propagation report...';
     return;
   }
+  document.body.classList.remove('audio-loading');
   if (state === 'playing') {
     btn.classList.add('playing');
     btn.disabled = false;
@@ -2092,29 +2094,26 @@ async function requestAudioReport() {
   const ctrl = new AbortController();
   audioAbortCtrl = ctrl;
 
-  // Fire both fetches in parallel — waiting audio plays immediately, report generates in background
-  const waitingFetchPromise = fetch('/audio/waiting').then(async r => {
-    if (!r.ok) return null;
-    const blob = await r.blob();
-    return URL.createObjectURL(blob);
-  }).catch(() => null);
-
+  // Start the real report fetch immediately in the background
   const reportFetchPromise = fetch(url, { signal: ctrl.signal });
 
-  // Play waiting audio as soon as it's ready (doesn't block report fetch)
-  waitingFetchPromise.then(waitUrl => {
-    if (!waitUrl) return;
-    // Only play if we're still in loading state (report hasn't arrived yet)
-    if (audioAbortCtrl === ctrl) {
-      const waitingAudio = new Audio(waitUrl);
+  // Track waiting audio so we can stop it once the report arrives
+  let waitingAudio = null;
+  let waitingObjectUrl = null;
+
+  try {
+    // Fetch waiting audio (fast, cached) and real report in parallel
+    const waitResp = await fetch('/audio/waiting');
+    if (waitResp.ok && audioAbortCtrl === ctrl) {
+      const waitBlob = await waitResp.blob();
+      waitingObjectUrl = URL.createObjectURL(waitBlob);
+      waitingAudio = new Audio(waitingObjectUrl);
       audioElement = waitingAudio;
       setAudioButtonState('playing');
       waitingAudio.play().catch(() => {});
-      waitingAudio.onended = () => { URL.revokeObjectURL(waitUrl); };
     }
-  });
 
-  try {
+    // Now await the real report (already in-flight since before waiting audio)
     const resp = await reportFetchPromise;
     if (!resp.ok) {
       let details = '';
@@ -2126,11 +2125,14 @@ async function requestAudioReport() {
     }
     const blob = await resp.blob();
     const objectUrl = URL.createObjectURL(blob);
+
     // Stop waiting audio before playing real report
     if (waitingAudio) {
       try { waitingAudio.pause(); waitingAudio.src = ''; } catch {}
+      if (waitingObjectUrl) { URL.revokeObjectURL(waitingObjectUrl); waitingObjectUrl = null; }
       waitingAudio = null;
     }
+
     const audio = new Audio(objectUrl);
     audioPlayback = { url: objectUrl };
     audioElement = audio;
@@ -2148,6 +2150,7 @@ async function requestAudioReport() {
   } catch (e) {
     if (waitingAudio) {
       try { waitingAudio.pause(); waitingAudio.src = ''; } catch {}
+      if (waitingObjectUrl) { URL.revokeObjectURL(waitingObjectUrl); waitingObjectUrl = null; }
     }
     if (e?.name !== 'AbortError') {
       setStatus(`Audio report failed: ${e.message || 'unknown error'}`, 'error');
