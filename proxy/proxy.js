@@ -1321,7 +1321,8 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
   const utcSpoken = pronounceUtc(params.utc);
 
   const lines = [];
-  // UTC date spoken e.g. "April 1st, 2026"
+
+  // ── Date header ──────────────────────────────────────────────────────────
   const MONTH_NAMES = ['January','February','March','April','May','June',
     'July','August','September','October','November','December'];
   const ORDINALS = (n) => {
@@ -1331,29 +1332,28 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
   };
   const now = new Date();
   const utcDateSpoken = `${MONTH_NAMES[now.getUTCMonth()]} ${ORDINALS(now.getUTCDate())}, ${now.getUTCFullYear()}`;
-
   lines.push(`${greeting}. H F Signals dot live propagation report, ${utcSpoken} U T C, ${utcDateSpoken}.`);
 
-  // Solar / geomagnetic conditions (omitted if params.includeSolar === false)
+  // ── Solar / geomagnetic conditions ───────────────────────────────────────
   if (params.includeSolar !== false) {
     const { sfi, ssn, a: aIdx, k: kIdx, wind, bz } = solar;
     const solarParts = [];
-    if (sfi != null)  solarParts.push(`Solar Flux ${sfi}`);
-    if (ssn != null)  solarParts.push(`Sunspot Number ${ssn}`);
+    if (sfi  != null) solarParts.push(`Solar Flux ${sfi}`);
+    if (ssn  != null) solarParts.push(`Sunspot Number ${ssn}`);
     if (aIdx != null) solarParts.push(`A index ${aIdx}`);
     if (kIdx != null) solarParts.push(`K index ${kIdx}`);
     if (wind != null) solarParts.push(`Solar wind ${wind} kilometers per second`);
-    if (bz != null) {
+    if (bz   != null) {
       const polarity = bz < 0 ? 'negative' : 'positive';
       solarParts.push(`B Z ${polarity} ${Math.abs(bz)} nanotesla`);
     }
     if (solarParts.length) lines.push(solarParts.join('. ') + '.');
   }
 
-  // Vantage point sentence
+  // ── Vantage point ────────────────────────────────────────────────────────
   if (params.mode === 'grid' && params.grid) {
     const radiusNum = Math.round(params.radius);
-    const unitWord = params.unit === 'km' ? 'kilometer' : 'mile';
+    const unitWord  = params.unit === 'km' ? 'kilometer' : 'mile';
     const unitPlural = radiusNum === 1 ? unitWord : unitWord + 's';
     const spokenPlace = params.gridPlaceName ? `, ${params.gridPlaceName}` : '';
     lines.push(`Vantage point: ${radiusNum} ${unitPlural} around grid ${pronounceGrid(params.grid)}${spokenPlace}.`);
@@ -1362,59 +1362,85 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
     lines.push(`Vantage point: ${regionName}.`);
   }
 
-  // ── Helper: Oxford-comma list ──────────────────────────────────────────────
+  // ── Helper: Oxford-comma list ────────────────────────────────────────────
   function oxfordList(items) {
+    if (!items.length) return '';
     if (items.length === 1) return items[0];
     if (items.length === 2) return `${items[0]} and ${items[1]}`;
     return items.slice(0, -1).join(', ') + `, and ${items[items.length - 1]}`;
   }
 
-  // ── Per-region signal block ─────────────────────────────────────────────────
-  // bandResults keys are the *source* regions (toRegion in data model).
-  // params.fromRegion is the vantage point (receiver).
-  const regionEntries = Object.entries(bandResults);
-  if (regionEntries.length === 0) {
+  // ── Signal section ───────────────────────────────────────────────────────
+  // Strategy: iterate bands (high→low), then for each band list all regions
+  // that have signal on that band. This avoids repeating mode lines per region
+  // and groups the report by band — much more natural to listen to.
+  //
+  // Structure per band:
+  //   "On 20 meters: Eastern North America +28 dB, Europe +26 dB. CW and FTx."
+  //   "On 40 meters: Eastern North America +24 dB, Europe +16 dB. CW and FTx."
+  //
+  // Regions with NO signal on ANY band are batched at the end:
+  //   "No signals heard from Africa, Asia, or Oceania."
+
+  const regionEntries = Object.entries(bandResults); // toRegion → { band → result }
+
+  // Collect all active regions (have signal on at least one band)
+  const activeRegions  = new Set();
+  const silentRegions  = [];
+  for (const [toRegion, bandData] of regionEntries) {
+    const hasAny = params.bands.some(b => bandData[b]?.hasSignal);
+    if (hasAny) activeRegions.add(toRegion);
+    else        silentRegions.push(REGION_NAME_BY_KEY[toRegion] || toRegion);
+  }
+
+  if (activeRegions.size === 0) {
     lines.push('No signal data was found for any region.');
   } else {
-    for (const [toRegion, bandData] of regionEntries) {
-      const srcName = REGION_NAME_BY_KEY[toRegion] || toRegion;
-      const isLocal = toRegion === params.fromRegion;
-
-      const active = params.bands
-        .map(band => ({ band, ...(bandData[band] || {}) }))
-        .filter(b => b.hasSignal);
-
-      // Region has no signals — always report it
-      if (active.length === 0) {
-        lines.push(`There are no signals spotted from ${srcName}.`);
-        continue;
+    // Iterate bands in order (as configured — typically 160→10 or 10→160 depending on BAND_LABELS)
+    for (const band of params.bands) {
+      // Collect regions with signal on this band, local region first
+      const onBand = [];
+      for (const [toRegion, bandData] of regionEntries) {
+        if (!activeRegions.has(toRegion)) continue;
+        const b = bandData[band];
+        if (!b?.hasSignal) continue;
+        onBand.push({ toRegion, b });
       }
+      if (onBand.length === 0) continue;
 
-      // ── SNR run-on: "Locally, in Eastern North America: on 20m, +26 dB; and on 15m, +18 dB."
-      //               "Signals from Europe: on 20m, +21 dB; and on 15m, +14 dB."
-      const regionIntro = isLocal ? `Locally, in ${srcName}` : `Signals from ${srcName}`;
-      const snrParts = active.map((b, i) => {
-        const prefix = (i === active.length - 1 && active.length > 1) ? 'and on' : 'on';
-        return `${prefix} ${bandLabelSpoken(b.band)}, ${spokenSnr(b.snr)}`;
+      // SNR list: "Eastern North America plus 28 dB, Europe plus 26 dB"
+      const snrParts = onBand.map(({ toRegion, b }) => {
+        const name = (toRegion === params.fromRegion)
+          ? `local ${REGION_NAME_BY_KEY[toRegion] || toRegion}`
+          : (REGION_NAME_BY_KEY[toRegion] || toRegion);
+        return `${name} ${spokenSnr(b.snr)}`;
       });
-      lines.push(`${regionIntro}: ${snrParts.join('; ')}.`);
 
-      // ── Mode summaries — only mention modes that actually have spots ──────
-      // Mode summaries — compact band list ("20, 15, and 10 meters" not repeated)
-      const cwBands   = active.filter(b => b.modes?.has('CW')).map(b => b.band);
-      const digBands  = active.filter(b => b.modes?.has('FT8') || b.modes?.has('FT4')).map(b => b.band);
-      const rttyBands = active.filter(b => b.modes?.has('RTTY')).map(b => b.band);
-      const ssbBands  = active.filter(b => b.ssbOk).map(b => b.band);
+      // Mode summary — union across all regions for this band
+      const bandModeSet = new Set();
+      for (const { b } of onBand) {
+        if (b.modes) for (const m of b.modes) bandModeSet.add(m);
+        if (b.ssbOk) bandModeSet.add('SSB');
+      }
+      const modeLabels = [];
+      if (bandModeSet.has('CW'))               modeLabels.push('CW');
+      if (bandModeSet.has('FT8') || bandModeSet.has('FT4')) modeLabels.push('F T x');
+      if (bandModeSet.has('RTTY'))             modeLabels.push('RTTY');
+      if (bandModeSet.has('SSB'))              modeLabels.push('SSB');
 
-      if (cwBands.length)   lines.push(`CW spots on ${bandListSpoken(cwBands)}.`);
-      if (digBands.length)  lines.push(`Digital F T x spots on ${bandListSpoken(digBands)}.`);
-      if (rttyBands.length) lines.push(`RTTY spots on ${bandListSpoken(rttyBands)}.`);
-      if (ssbBands.length)  lines.push(`SSB supported on ${bandListSpoken(ssbBands)}.`);
+      const modeStr = modeLabels.length ? ` ${oxfordList(modeLabels)} active.` : '';
+      lines.push(`On ${bandLabelSpoken(band)}: ${snrParts.join(', ')}.${modeStr}`);
     }
   }
 
-  // Dynamic closing: point-in-time note with counts, then "go to" CTA.
-  // Static attribution + W1VE outro is appended as a pre-rendered MP3 (see OUTRO_AUDIO_PATH).
+  // Silent regions batched into one sentence
+  if (silentRegions.length === 1) {
+    lines.push(`No signals heard from ${silentRegions[0]}.`);
+  } else if (silentRegions.length > 1) {
+    lines.push(`No signals heard from ${oxfordList(silentRegions)}.`);
+  }
+
+  // ── Closing ──────────────────────────────────────────────────────────────
   const skimmers = sourceStats.skimmers || 0;
   const ftxCount = sourceStats.ftxCount || 0;
   lines.push(`Point-in-time snapshot. ${skimmers} skimmers and ${ftxCount} F T x reports used. Visit H F Signals dot live for the latest.`);
