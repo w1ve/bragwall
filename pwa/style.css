@@ -63,13 +63,18 @@ body.theme-cb {
   --yellow:    #f6d84a;
   --orange:    #ff9f1a;
   --red:       #d94fb2;
-  --pk-green:  #1f6b95;
-  --pk-yellow: #7f6b20;
-  --pk-orange: #7e4c10;
-  --pk-red:    #6a2a5f;
+  --pk-green:  #5ea5cf;
+  --pk-yellow: #bca845;
+  --pk-orange: #c07d32;
+  --pk-red:    #a85f9b;
   --dimmed:    #1f2750;
   --border:    #4fd7ff;
   --no-data:   #6f7f99;
+}
+
+/* CB accessibility tuning: keep all small text/badge states WCAG-readable. */
+body.theme-cb .byline-tnx {
+  opacity: 1;
 }
 
 html, body {
@@ -380,6 +385,21 @@ body.theme-cb .mode-ssb {
   background: #7c5a0b !important;
   border-color: #ffd44f;
   box-shadow: 0 0 3px rgba(255,212,79,0.45);
+}
+
+body.theme-cb .mode-dim {
+  color: #b5c6de;
+  border-color: #6f85a8;
+}
+
+body.theme-cb .theme-btn:hover {
+  border-color: #7adfff;
+  background: rgba(79, 215, 255, 0.18);
+}
+
+body.theme-cb .theme-btn.active {
+  color: #0b1126;
+  border-color: #7adfff;
 }
 
 /* Inactive — clearly readable, muted red */
@@ -1011,6 +1031,10 @@ footer#status-bar {
 footer#status-bar.ok    { color: #00be64; }
 footer#status-bar.warn  { color: #c89e2d; }
 footer#status-bar.error { color: #dc4a4a; }
+
+body.theme-cb footer#status-bar.error {
+  color: #ff8f96;
+}
 
 /* ── Scan line overlay ───────────────────────────────────────────── */
 body::after {
