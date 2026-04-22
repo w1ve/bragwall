@@ -22,6 +22,16 @@ const DESKTOP_REGION_TITLES = [
   'Asia',
   'Oceania',
 ];
+const DESKTOP_REGION_TITLE_LINES = [
+  'Eastern\nNorth America',
+  'Central\nNorth America',
+  'Western\nNorth America',
+  'South\nAmerica',
+  'Europe',
+  'Africa',
+  'Asia',
+  'Oceania',
+];
 
 const BANDS = [
   { label: '160m', min: 1800,  max: 2000  },
@@ -1198,10 +1208,11 @@ function setDesktopPanelCollapsed(regionIdx, collapsed, shouldSave = true) {
   const hdr = deskHeaders[regionIdx];
   const hdrName = deskHeaderNames[regionIdx];
   const longName = DESKTOP_REGION_TITLES[regionIdx] || REGIONS[regionIdx] || '';
+  const twoLineName = DESKTOP_REGION_TITLE_LINES[regionIdx] || longName;
   if (panel) panel.classList.toggle('collapsed', desktopCollapsed[regionIdx]);
   if (hdr) hdr.setAttribute('aria-expanded', String(!desktopCollapsed[regionIdx]));
   if (hdrName) {
-    hdrName.textContent = desktopCollapsed[regionIdx] ? (REGION_KEYS[regionIdx] || longName) : longName;
+    hdrName.textContent = desktopCollapsed[regionIdx] ? (REGION_KEYS[regionIdx] || longName) : twoLineName;
     hdrName.title = longName;
   }
   if (shouldSave) saveSettings();
@@ -1236,6 +1247,7 @@ function buildDesktopPanels() {
 
   REGIONS.forEach((_, ri) => {
     const title = DESKTOP_REGION_TITLES[ri] || REGIONS[ri];
+    const titleTwoLine = DESKTOP_REGION_TITLE_LINES[ri] || title;
     const panel = document.createElement('div');
     panel.className = 'region-panel';
 
@@ -1245,7 +1257,7 @@ function buildDesktopPanels() {
     hdr.setAttribute('tabindex', '0');
     const hdrName = document.createElement('span');
     hdrName.className = 'region-header-name';
-    hdrName.textContent = title;
+    hdrName.textContent = titleTwoLine;
     hdrName.title = title;
     const hdrChevron = document.createElement('span');
     hdrChevron.className = 'region-header-chevron';

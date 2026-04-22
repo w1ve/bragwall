@@ -559,14 +559,14 @@ h1 {
 
 .region-header {
   font-family: 'Orbitron', monospace;
-  font-size: 9px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--text-hdr);
   text-align: center;
-  padding: 5px 4px 4px;
+  padding: 3px 4px 3px;
   border-bottom: 1px solid rgba(0,212,170,0.3);
-  letter-spacing: 0.05em;
-  height: var(--hdr-h);
+  letter-spacing: 0.06em;
+  min-height: 31px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -582,17 +582,25 @@ h1 {
 
 .region-header-name {
   flex: 1;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  text-align: center;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.02;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding-right: 10px;
 }
 
 .region-header-chevron {
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: 8px;
   line-height: 1;
   flex-shrink: 0;
+  position: absolute;
+  right: 3px;
+  top: 3px;
   transition: transform 0.2s ease;
 }
 
@@ -659,26 +667,12 @@ h1 {
   padding: 4px 2px 3px;
   justify-content: center;
   align-items: center;
-  min-height: 31px;
-  position: relative;
 }
 
 .region-panel.collapsed .region-header-name {
-  text-align: center;
-  white-space: normal;
-  overflow: visible;
-  text-overflow: clip;
-  line-height: 1.02;
-  font-size: 14px;
+  line-height: 1;
   letter-spacing: 0.07em;
-  font-weight: 800;
-}
-
-.region-panel.collapsed .region-header-chevron {
-  position: absolute;
-  right: 3px;
-  top: 3px;
-  font-size: 8px;
+  padding-right: 0;
 }
 
 .band-rows {
