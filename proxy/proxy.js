@@ -1008,6 +1008,7 @@ async function ensurePskForAudio() {
 }
 
 async function collectRbnBandResults(params) {
+  pruneSpots(); // ensure stale entries are removed before audio processing
   const bandState = {};
   for (const b of params.bands) bandState[b] = bandResultTemplate();
 
@@ -1030,7 +1031,9 @@ async function collectRbnBandResults(params) {
     }));
   }
 
+  const spotAgeCutoff = Date.now() - 120_000; // match UI 120-second freshness window
   for (const [dxCall, spot] of spotMap) {
+    if (spot.lastSeen < spotAgeCutoff) continue; // skip stale spots, same as UI
     const band = bandForFrequencyKhz(spot.freq);
     if (!band || !bandState[band]) continue;
     const toRegion = classifyCallsignRegion(dxCall);
@@ -1080,11 +1083,17 @@ function finalizeBandResults(params, bandState) {
     else if (Number.isFinite(rbnSnr)) combined = rbnSnr;
     else if (Number.isFinite(ftxScaled)) combined = ftxScaled;
     const hasSignal = Number.isFinite(combined);
+    // Build mode set from RBN data — only add PSK-sourced modes if PSK_MODES includes them
     const modes = new Set(Array.from(b.rbnModes || []));
+    // PSKReporter feed is FT8-only (no FT4 in this pipeline); add FT8 only if PSK data present
     if (Number.isFinite(ftxSnr)) {
       modes.add('FT8');
-      modes.add('FT4');
+      // Note: FT4 is NOT added — PSKReporter rronly feed does not surface FT4 via this integration
     }
+    // Apply mode filters from params (respect UI checkbox state)
+    if (!params.cwChecked)   modes.delete('CW');
+    if (!params.rttyChecked) modes.delete('RTTY');
+    if (!params.ftxChecked) { modes.delete('FT8'); modes.delete('FT4'); }
     out[band] = {
       hasSignal,
       snr: hasSignal ? Math.round(combined * 10) / 10 : null,
@@ -1100,6 +1109,20 @@ function finalizeBandResults(params, bandState) {
 function bandLabelSpoken(band) {
   // "20m" => "20 meters", "160m" => "160 meters"
   return band.replace(/m$/, ' meters');
+}
+
+function bandNumberOnly(band) {
+  // "20m" => "20", "160m" => "160"
+  return band.replace(/m$/, '');
+}
+
+function bandListSpoken(bands) {
+  // Produces compact speech: "20, 15, and 10 meters" instead of repeating "meters"
+  if (bands.length === 0) return '';
+  if (bands.length === 1) return bandLabelSpoken(bands[0]);
+  const nums = bands.map(bandNumberOnly);
+  if (nums.length === 2) return `${nums[0]} and ${nums[1]} meters`;
+  return nums.slice(0, -1).join(', ') + `, and ${nums[nums.length - 1]} meters`;
 }
 
 function spokenSnr(snr) {
@@ -1371,19 +1394,16 @@ function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {})
       lines.push(`${regionIntro}: ${snrParts.join('; ')}.`);
 
       // ── Mode summaries — only mention modes that actually have spots ──────
-      const cwBands   = active.filter(b => b.modes?.has('CW'))
-                              .map(b => bandLabelSpoken(b.band));
-      const digBands  = active.filter(b => b.modes?.has('FT8') || b.modes?.has('FT4'))
-                              .map(b => bandLabelSpoken(b.band));
-      const rttyBands = active.filter(b => b.modes?.has('RTTY'))
-                              .map(b => bandLabelSpoken(b.band));
-      const ssbBands  = active.filter(b => b.ssbOk)
-                              .map(b => bandLabelSpoken(b.band));
+      // Mode summaries — compact band list ("20, 15, and 10 meters" not repeated)
+      const cwBands   = active.filter(b => b.modes?.has('CW')).map(b => b.band);
+      const digBands  = active.filter(b => b.modes?.has('FT8') || b.modes?.has('FT4')).map(b => b.band);
+      const rttyBands = active.filter(b => b.modes?.has('RTTY')).map(b => b.band);
+      const ssbBands  = active.filter(b => b.ssbOk).map(b => b.band);
 
-      if (cwBands.length)   lines.push(`CW spots are reported on ${oxfordList(cwBands)}.`);
-      if (digBands.length)  lines.push(`Digital spots are reported on ${oxfordList(digBands)}.`);
-      if (rttyBands.length) lines.push(`RTTY spots are reported on ${oxfordList(rttyBands)}.`);
-      if (ssbBands.length)  lines.push(`SSB is supported on ${oxfordList(ssbBands)}.`);
+      if (cwBands.length)   lines.push(`CW spots on ${bandListSpoken(cwBands)}.`);
+      if (digBands.length)  lines.push(`Digital F T x spots on ${bandListSpoken(digBands)}.`);
+      if (rttyBands.length) lines.push(`RTTY spots on ${bandListSpoken(rttyBands)}.`);
+      if (ssbBands.length)  lines.push(`SSB supported on ${bandListSpoken(ssbBands)}.`);
     }
   }
 
