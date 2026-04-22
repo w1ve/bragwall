@@ -1196,7 +1196,7 @@ const DISPLAY_MODES = [
   { abbr: 'RY',  sources: ['RTTY'],      isSSB: false },
   { abbr: 'DIG', sources: ['FT8','FT4'], isSSB: false },
 ];
-const MODE_QUALITY_KEY = { CW: 'CW', RY: 'RTTY', FTx: 'FTx', SSB: 'SSB' };
+const MODE_QUALITY_KEY = { CW: 'CW', RY: 'RTTY', DIG: 'FTx', FTx: 'FTx', SSB: 'SSB' };
 
 function buildQualityTrack(frac, enabled) {
   const track = document.createElement('span');
