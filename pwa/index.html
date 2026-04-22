@@ -113,7 +113,7 @@
         <span id="skimmer-count" class="sr-only">0 skimmers / 0 FTx reports</span>
       </div>
       <div class="vantage-audio-wrap">
-        <button type="button" id="vantage-audio-btn" class="audio-btn" aria-label="Play propagation audio report" title="Play audio propagation report">🔊</button>
+        <button type="button" id="vantage-audio-btn" class="audio-btn" aria-label="Play propagation audio report" title="Audio Radio Conditions Report (updated every 15 minutes)">🔊</button>
         <audio id="vantage-audio-player" preload="none"></audio>
       </div>
     </div>
@@ -134,6 +134,22 @@
   </footer>
 
   <script src="app.js"></script>
+  <script>
+    (function() {
+      fetch('/audio/tooltip')
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(d){
+          if (!d || !d.tooltip) return;
+          var btn = document.getElementById('vantage-audio-btn');
+          if (btn) {
+            btn.title = d.tooltip;
+            btn.setAttribute('aria-label', d.tooltip);
+          }
+        })
+        .catch(function(){});
+    })();
+  </script>
 </body>
 </html>
+
 

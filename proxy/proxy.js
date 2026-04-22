@@ -853,6 +853,29 @@ function outputLanguage(ttsLang) {
   return ttsLang;
 }
 
+const AUDIO_TOOLTIP_TRANSLATIONS = {
+  en: 'Audio Radio Conditions Report (updated every 15 minutes)',
+  fr: 'Rapport audio sur les conditions radio (mis à jour toutes les 15 minutes)',
+  es: 'Informe de condiciones de radio en audio (actualizado cada 15 minutos)',
+  de: 'Audio-Funkbedingungsbericht (alle 15 Minuten aktualisiert)',
+  it: 'Rapporto audio sulle condizioni radio (aggiornato ogni 15 minuti)',
+  pt: 'Relatório de condições de rádio em áudio (atualizado a cada 15 minutos)',
+  ar: 'تقرير صوتي لأحوال الراديو (يُحدَّث كل 15 دقيقة)',
+  ru: 'Аудиоотчёт о состоянии радиосвязи (обновляется каждые 15 минут)',
+  ro: 'Raport audio privind condițiile radio (actualizat la fiecare 15 minute)',
+  ja: '無線コンディション音声レポート（15分ごとに更新）',
+  he: 'דוח קולי על מצב הרדיו (מתעדכן כל 15 דקות)',
+  hy: 'Ռադիոյի պայմանների ձայնային զեկույց (թարմացվում է ամեն 15 րոպեն)',
+  tr: 'Sesli Radyo Koşulları Raporu (her 15 dakikada bir güncellenir)',
+  hi: 'ऑडियो रेडियो स्थितियाँ रिपोर्ट (हर 15 मिनट में अपडेट होती है)',
+  zh: '无线电条件音频报告（每15分钟更新一次）',
+};
+
+function audioTooltipText(lang) {
+  const code = outputLanguage(lang);
+  return AUDIO_TOOLTIP_TRANSLATIONS[code] || AUDIO_TOOLTIP_TRANSLATIONS['en'];
+}
+
 function bandResultTemplate() {
   return {
     rbnSnrValues: [],
@@ -1139,6 +1162,8 @@ function buildAudioReportText(params, bandResults) {
     lines.push(`${joinBands(noSignal)} have no reported signals.`);
   }
 
+  lines.push('Go to H F Signals dot live for the latest data.');
+
   return lines.join(' ');
 }
 
@@ -1313,6 +1338,8 @@ function sendAudioFile(res, filePath, generated, lang) {
       'Cache-Control': 'public, max-age=60',
       'X-HFSIGNALS-Audio': generated ? 'generated' : 'cached',
       'X-HFSIGNALS-Language': outputLanguage(lang),
+      'X-HFSIGNALS-Tooltip': audioTooltipText(lang),
+      'Access-Control-Expose-Headers': 'X-HFSIGNALS-Audio, X-HFSIGNALS-Language, X-HFSIGNALS-Tooltip',
     });
     fs.createReadStream(filePath).pipe(res);
   }).catch(() => {
@@ -1461,6 +1488,29 @@ const server = http.createServer(async (req, res) => {
     try { await servePsk(res, parsed.query || {}); } catch (_) { send(res, 502, 'text/plain', 'PSK fetch error'); }
     return;
   }
+  if (parts[0] === 'audio' && parts[1] === 'tooltip') {
+    const q = parsed.query || {};
+    const lang = normalizeLanguageCode(q.lang || q.language || req.headers['accept-language'] || 'en');
+    const clientIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+      || req.socket?.remoteAddress || null;
+    // Geo-detect language if not supplied
+    let resolvedLang = lang;
+    if (!q.lang && !q.language && clientIp) {
+      try {
+        const geoInfo = await countryFromIp(clientIp);
+        if (geoInfo && geoInfo.countryCode) {
+          // Map country code to language (best-effort)
+          const CC_LANG = { FR:'fr', ES:'es', MX:'es', AR:'es', CO:'es', CL:'es', PE:'es',
+            DE:'de', AT:'de', CH:'de', IT:'it', PT:'pt', BR:'pt', RU:'ru', JP:'ja',
+            CN:'zh', TW:'zh', HK:'zh', SA:'ar', EG:'ar', IL:'he', TR:'tr', RO:'ro',
+            IN:'hi', HY:'hy', AM:'hy' };
+          resolvedLang = CC_LANG[geoInfo.countryCode] || lang;
+        }
+      } catch {}
+    }
+    sendJson(res, 200, { tooltip: audioTooltipText(resolvedLang), lang: outputLanguage(resolvedLang) });
+    return;
+  }
   if (parts[0] === 'audio' && parts[1] === 'propreport') {
     try { await serveAudioPropReport(req, res, parsed.query || {}); } catch (e) {
       console.error('[audio] propreport error:', e?.message || e);
@@ -1488,4 +1538,5 @@ server.listen(PORT, '0.0.0.0', () => {
 
 process.on('SIGTERM', () => server.close(() => process.exit(0)));
 process.on('SIGINT',  () => server.close(() => process.exit(0)));
+
 
