@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>hfsignals.live badge test bench</title>
+  <style>
+    :root {
+      --bg: #0b0f1a;
+      --panel: #10182a;
+      --panel-2: #162238;
+      --text: #d6e3ff;
+      --muted: #8fa4cf;
+      --ok: #29c76f;
+      --fail: #ff5d5d;
+      --warn: #ffb14a;
+      --link: #7cc6ff;
+      --border: #27456f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 26px;
+    }
+    .sub {
+      margin: 0 0 16px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .topbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 16px;
+    }
+    .chip {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 13px;
+    }
+    button {
+      border: 1px solid var(--border);
+      background: #1d2e4c;
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.1); }
+    a { color: var(--link); }
+    details {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 10px;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+    summary {
+      cursor: pointer;
+      padding: 12px;
+      font-weight: 700;
+      background: var(--panel-2);
+      border-bottom: 1px solid var(--border);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(370px, 1fr));
+      gap: 12px;
+      padding: 12px;
+    }
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      background: #0e1627;
+    }
+    .card.ok { border-color: rgba(41, 199, 111, 0.75); }
+    .card.fail { border-color: rgba(255, 93, 93, 0.85); }
+    .card .title {
+      font-size: 13px;
+      margin: 0 0 8px;
+      color: #c8dcff;
+      word-break: break-word;
+    }
+    .card .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 8px 0;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .status {
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #11203a;
+    }
+    .status.ok { color: var(--ok); border-color: rgba(41, 199, 111, 0.7); }
+    .status.fail { color: var(--fail); border-color: rgba(255, 93, 93, 0.8); }
+    .status.pending { color: var(--warn); }
+    .img-wrap {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #080d18;
+      border: 1px dashed #294569;
+      border-radius: 6px;
+      padding: 8px;
+    }
+    .img-wrap img {
+      max-width: 100%;
+      height: auto;
+      display: block;
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
+    }
+    .err {
+      color: #ff9f9f;
+      font-size: 12px;
+      margin-top: 6px;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>hfsignals.live badge test bench</h1>
+    <p class="sub">
+      Static verification page for badge variants using the <code>/badges</code> prefix.
+      This includes both <b>dark</b> and <b>light</b> themes, all supported sizes
+      (<code>small</code>, <code>full</code>, <code>large</code>) and both badge modes
+      (<code>region</code>, <code>grid</code>).
+    </p>
+
+    <div class="topbar">
+      <span class="chip">Base: <code id="base-url"></code></span>
+      <span class="chip">Total: <span id="count-total">0</span></span>
+      <span class="chip">Loaded: <span id="count-ok">0</span></span>
+      <span class="chip">Failed: <span id="count-fail">0</span></span>
+      <button id="reload-all" type="button">Reload all</button>
+      <button id="show-fails" type="button">Show failed only</button>
+      <button id="show-all" type="button">Show all</button>
+    </div>
+
+    <details open>
+      <summary>Core matrix (region + grid, all bands, all sizes, dark/light)</summary>
+      <div id="core-grid" class="grid"></div>
+    </details>
+
+    <details>
+      <summary>Region coverage (all vantage areas as from/to)</summary>
+      <div id="coverage-grid" class="grid"></div>
+    </details>
+
+    <details>
+      <summary>Legacy URL compatibility (/badges, /badge, /hfsignals)</summary>
+      <div id="compat-grid" class="grid"></div>
+    </details>
+  </div>
+
+  <script>
+    (function () {
+      const BASE = window.location.origin;
+      document.getElementById('base-url').textContent = BASE;
+
+      const BANDS = ['160m', '80m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', 'all'];
+      const THEMES = ['dark', 'light'];
+      const SIZES = ['small', 'full', 'large'];
+      const REGION_KEYS = ['ENA', 'CNA', 'WNA', 'CAR', 'SA', 'EU', 'AF', 'AS', 'OC'];
+
+      const cards = [];
+      let failOnly = false;
+
+      function toQuery(params) {
+        return new URLSearchParams(params).toString();
+      }
+
+      function addCase(targetEl, title, path, params) {
+        const url = `${BASE}${path}?${toQuery(params)}`;
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.dataset.state = 'pending';
+
+        const titleEl = document.createElement('p');
+        titleEl.className = 'title';
+        titleEl.textContent = title;
+
+        const imgWrap = document.createElement('div');
+        imgWrap.className = 'img-wrap';
+
+        const img = document.createElement('img');
+        img.alt = title;
+        img.loading = 'lazy';
+
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        const st = document.createElement('span');
+        st.className = 'status pending';
+        st.textContent = 'loading';
+        meta.appendChild(st);
+
+        const link = document.createElement('a');
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.textContent = 'open';
+        meta.appendChild(link);
+
+        const code = document.createElement('code');
+        code.textContent = `${path}?${toQuery(params)}`;
+        meta.appendChild(code);
+
+        const err = document.createElement('div');
+        err.className = 'err';
+
+        img.onload = function () {
+          card.classList.remove('fail');
+          card.classList.add('ok');
+          card.dataset.state = 'ok';
+          st.className = 'status ok';
+          st.textContent = 'ok';
+          err.textContent = '';
+          refreshCounters();
+        };
+        img.onerror = function () {
+          card.classList.remove('ok');
+          card.classList.add('fail');
+          card.dataset.state = 'fail';
+          st.className = 'status fail';
+          st.textContent = 'failed';
+          err.textContent = `Image failed to load\n${url}`;
+          refreshCounters();
+        };
+
+        img.src = url;
+        imgWrap.appendChild(img);
+
+        card.appendChild(titleEl);
+        card.appendChild(imgWrap);
+        card.appendChild(meta);
+        card.appendChild(err);
+        targetEl.appendChild(card);
+        cards.push(card);
+      }
+
+      function refreshCounters() {
+        const total = cards.length;
+        const ok = cards.filter((c) => c.dataset.state === 'ok').length;
+        const fail = cards.filter((c) => c.dataset.state === 'fail').length;
+        document.getElementById('count-total').textContent = String(total);
+        document.getElementById('count-ok').textContent = String(ok);
+        document.getElementById('count-fail').textContent = String(fail);
+
+        cards.forEach((c) => {
+          if (!failOnly) c.style.display = '';
+          else c.style.display = c.dataset.state === 'fail' ? '' : 'none';
+        });
+      }
+
+      function buildCoreMatrix() {
+        const root = document.getElementById('core-grid');
+        for (const theme of THEMES) {
+          for (const size of SIZES) {
+            for (const band of BANDS) {
+              addCase(
+                root,
+                `region NA→EU ${band} ${theme} ${size}`,
+                '/badges/region',
+                { from: 'NA', to: 'EU', band, theme, size }
+              );
+              addCase(
+                root,
+                `grid EL25/5000→EU ${band} ${theme} ${size}`,
+                '/badges/grid',
+                { grid: 'EL25', radius: '5000', to: 'EU', band, theme, size }
+              );
+            }
+          }
+        }
+      }
+
+      function buildCoverageMatrix() {
+        const root = document.getElementById('coverage-grid');
+        for (const from of REGION_KEYS) {
+          addCase(
+            root,
+            `coverage from=${from} to=EU`,
+            '/badges/region',
+            { from, to: 'EU', band: '20m', theme: 'dark', size: 'small' }
+          );
+        }
+        for (const to of REGION_KEYS) {
+          addCase(
+            root,
+            `coverage from=NA to=${to}`,
+            '/badges/region',
+            { from: 'NA', to, band: '20m', theme: 'light', size: 'small' }
+          );
+        }
+      }
+
+      function buildCompatibilityMatrix() {
+        const root = document.getElementById('compat-grid');
+        const prefixes = ['/badges', '/badge', '/hfsignals'];
+        for (const p of prefixes) {
+          addCase(
+            root,
+            `${p}/region (dark full)`,
+            `${p}/region`,
+            { from: 'NA', to: 'EU', band: '20m', theme: 'dark', size: 'full' }
+          );
+          addCase(
+            root,
+            `${p}/region (light large)`,
+            `${p}/region`,
+            { from: 'NA', to: 'EU', band: '20m', theme: 'light', size: 'large' }
+          );
+          addCase(
+            root,
+            `${p}/grid (dark full)`,
+            `${p}/grid`,
+            { grid: 'EL25', radius: '5000', to: 'EU', band: '20m', theme: 'dark', size: 'full' }
+          );
+          addCase(
+            root,
+            `${p}/grid (light large)`,
+            `${p}/grid`,
+            { grid: 'EL25', radius: '5000', to: 'EU', band: '20m', theme: 'light', size: 'large' }
+          );
+        }
+      }
+
+      document.getElementById('reload-all').addEventListener('click', () => {
+        cards.forEach((c) => {
+          const img = c.querySelector('img');
+          if (!img) return;
+          c.classList.remove('ok', 'fail');
+          c.dataset.state = 'pending';
+          const st = c.querySelector('.status');
+          if (st) {
+            st.className = 'status pending';
+            st.textContent = 'loading';
+          }
+          const src = img.src.split('#')[0];
+          img.src = `${src}#r=${Date.now()}`;
+        });
+        refreshCounters();
+      });
+      document.getElementById('show-fails').addEventListener('click', () => {
+        failOnly = true;
+        refreshCounters();
+      });
+      document.getElementById('show-all').addEventListener('click', () => {
+        failOnly = false;
+        refreshCounters();
+      });
+
+      buildCoreMatrix();
+      buildCoverageMatrix();
+      buildCompatibilityMatrix();
+      refreshCounters();
+    })();
+  </script>
+</body>
+</html>

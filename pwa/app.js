@@ -12,6 +12,26 @@ const REGIONS = [
   'Oceania',
 ];
 const REGION_KEYS = ['ENA', 'CNA', 'WNA', 'SA', 'EU', 'AF', 'AS', 'OC'];
+const DESKTOP_REGION_TITLES = [
+  'Eastern North America',
+  'Central North America',
+  'Western North America',
+  'South America',
+  'Europe',
+  'Africa',
+  'Asia',
+  'Oceania',
+];
+const DESKTOP_REGION_TITLE_LINES = [
+  'Eastern\nNorth America',
+  'Central\nNorth America',
+  'Western\nNorth America',
+  'South\nAmerica',
+  'Europe',
+  'Africa',
+  'Asia',
+  'Oceania',
+];
 
 const BANDS = [
   { label: '160m', min: 1800,  max: 2000  },
@@ -33,6 +53,7 @@ const SEG_COUNT  = 15;
 
 const SSB_SNR_THRESHOLD = 20.0;  // min median SNR (dB) for SSB to be considered workable
 const KNOWN_MODES = ['CW', 'RTTY', 'FT8', 'FT4'];
+const TOOLTIP_CALLSIGN_LIMIT = 120;
 
 const PROXY_BASE = '';   // empty = same origin as the PWA
 const REGION_INDEX_BY_KEY = REGION_KEYS.reduce((acc, key, idx) => {
@@ -46,9 +67,168 @@ const SEG_COLORS = {
   peak: ['#005a22','#005a22','#005a22','#005a22','#005a22','#005a22','#005a22','#005a22','#005a22',
          '#645500','#645500','#645500','#723c00','#641212','#641212'],
 };
+const DEFAULT_MODE_QUALITY_COLORS = ['#00d250', '#e6c800', '#ff8c00', '#dc1e1e'];
+const SUPPORTED_THEMES = new Set(['dark', 'light', 'cb']);
+const THEME_META_COLORS = { dark: '#0d0d1a', light: '#f4f7fb', cb: '#0f1222' };
+const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+let currentTheme = 'dark';
+let meterPalette = {
+  live: SEG_COLORS.live.slice(),
+  peak: SEG_COLORS.peak.slice(),
+  quality: DEFAULT_MODE_QUALITY_COLORS.slice(),
+  dimmed: '#1c1c32',
+};
 
 let pskByRegion = {};
 let pskMeta = { age: null, cached: false, stale: false };
+let latestModeQualityByBand = createModeQualityCube();
+
+const VANTAGE_GRID_COLOR = '#ffffff';
+const SOURCE_REGION_NAMES = [
+  'E. North America',
+  'C. North America',
+  'W. North America',
+  'Caribbean',
+  'South America',
+  'Europe',
+  'Africa',
+  'Asia',
+  'Oceania',
+];
+const SOURCE_REGION_KEYS = ['ENA', 'CNA', 'WNA', 'CAR', 'SA', 'EU', 'AF', 'AS', 'OC'];
+const CARIBBEAN_REGION_INDEX = 3;
+const CARIBBEAN_CENTER = { lat: 17.0, lon: -72.0, radiusMiles: 950 };
+const REGION_LAND_KEY = ['NA', 'NA', 'NA', 'CAR', 'SA', 'EU', 'AF', 'AS', 'OC'];
+const WORLD_GEOJSON_SOURCES = [
+  'https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json',
+  'https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson',
+];
+const US_STATES_GEOJSON_SOURCES = [
+  'https://raw.githubusercontent.com/PublicaMundi/MappingAPI/master/data/geojson/us-states.json',
+];
+const CANADA_PROVINCES_GEOJSON_SOURCES = [
+  'https://raw.githubusercontent.com/codeforgermany/click_that_hood/main/public/data/canada.geojson',
+];
+let detailedWorldPolygons = null;
+let detailedWorldRegionPolygons = null;
+let detailedNorthAmericaSplitPolygons = null;
+let detailedWorldLoadPromise = null;
+let detailedWorldLoadFailed = false;
+const CARIBBEAN_COUNTRIES = new Set([
+  'The Bahamas', 'Cuba', 'Jamaica', 'Haiti', 'Dominican Republic', 'Puerto Rico',
+  'Trinidad and Tobago', 'Barbados', 'Antigua and Barbuda', 'Dominica',
+  'Saint Lucia', 'Saint Vincent and the Grenadines', 'Grenada',
+  'Saint Kitts and Nevis', 'Aruba', 'Curacao', 'Curaçao', 'Guadeloupe', 'Martinique',
+  'Belize', 'Bermuda',
+]);
+const SOUTH_AMERICA_COUNTRIES = new Set([
+  'Argentina', 'Bolivia', 'Brazil', 'Chile', 'Colombia', 'Ecuador', 'Guyana',
+  'Paraguay', 'Peru', 'Suriname', 'Uruguay', 'Venezuela', 'French Guiana',
+]);
+const NORTH_AMERICA_COUNTRIES = new Set([
+  'USA', 'Canada', 'Mexico', 'Greenland', 'Belize', 'Guatemala', 'Honduras',
+  'El Salvador', 'Nicaragua', 'Costa Rica', 'Panama',
+]);
+const EUROPE_COUNTRIES = new Set([
+  'Albania', 'Andorra', 'Austria', 'Belarus', 'Belgium', 'Bosnia and Herzegovina',
+  'Bulgaria', 'Croatia', 'Czech Republic', 'Denmark', 'Estonia', 'Finland',
+  'France', 'Germany', 'Greece', 'Hungary', 'Iceland', 'Ireland', 'Italy',
+  'Kosovo', 'Latvia', 'Lithuania', 'Luxembourg', 'Macedonia', 'Moldova', 'Monaco',
+  'Montenegro', 'Netherlands', 'Norway', 'Poland', 'Portugal', 'Romania',
+  'Russia', 'Serbia', 'Slovakia', 'Slovenia', 'Spain', 'Sweden', 'Switzerland',
+  'Ukraine', 'United Kingdom', 'Northern Cyprus', 'Cyprus', 'Turkey', 'San Marino',
+  'Vatican', 'Vatican City', 'Faroe Islands', 'Gibraltar', 'Isle of Man', 'Jersey', 'Guernsey',
+]);
+const AFRICA_COUNTRIES = new Set([
+  'Algeria', 'Angola', 'Benin', 'Botswana', 'Burkina Faso', 'Burundi', 'Cameroon',
+  'Central African Republic', 'Chad', 'Democratic Republic of the Congo',
+  'Republic of the Congo', 'Djibouti', 'Egypt', 'Equatorial Guinea', 'Eritrea',
+  'Ethiopia', 'Gabon', 'Gambia', 'Ghana', 'Guinea', 'Guinea Bissau', 'Ivory Coast',
+  'Kenya', 'Lesotho', 'Liberia', 'Libya', 'Madagascar', 'Malawi', 'Mali',
+  'Mauritania', 'Morocco', 'Mozambique', 'Namibia', 'Niger', 'Nigeria', 'Rwanda',
+  'Senegal', 'Sierra Leone', 'Somalia', 'Somaliland', 'South Africa',
+  'South Sudan', 'Sudan', 'Swaziland', 'eSwatini', 'Tanzania', 'Togo', 'Tunisia',
+  'Uganda', 'Western Sahara', 'Zambia', 'Zimbabwe',
+]);
+const OCEANIA_COUNTRIES = new Set([
+  'Australia', 'New Zealand', 'Papua New Guinea', 'Fiji',
+  'Solomon Islands', 'Vanuatu', 'New Caledonia',
+]);
+const ENA_US_STATES = new Set([
+  'Maine', 'New Hampshire', 'Vermont', 'Massachusetts', 'Rhode Island', 'Connecticut',
+  'New York', 'New Jersey', 'Pennsylvania', 'Delaware', 'Maryland', 'District of Columbia',
+  'Alabama', 'Florida', 'Georgia', 'Kentucky', 'North Carolina', 'South Carolina', 'Tennessee',
+  'Virginia', 'Michigan', 'Ohio', 'West Virginia',
+]);
+const CNA_US_STATES = new Set([
+  'Illinois', 'Indiana', 'Wisconsin',
+  'Colorado', 'Iowa', 'Kansas', 'Minnesota', 'Missouri', 'Nebraska', 'North Dakota', 'South Dakota',
+  'Arkansas', 'Louisiana', 'Mississippi', 'New Mexico', 'Oklahoma', 'Texas',
+]);
+const WNA_US_STATES = new Set([
+  'Alaska', 'Arizona', 'California', 'Hawaii', 'Idaho', 'Montana',
+  'Nevada', 'Oregon', 'Utah', 'Washington', 'Wyoming',
+]);
+const ENA_CANADA_PROVINCES = new Set([
+  'Nova Scotia', 'New Brunswick', 'Prince Edward Island',
+  'Quebec', 'Ontario', 'Newfoundland and Labrador',
+]);
+const CNA_CANADA_PROVINCES = new Set([
+  'Manitoba', 'Saskatchewan', 'Alberta',
+]);
+const WNA_CANADA_PROVINCES = new Set([
+  'British Columbia', 'Yukon Territory', 'Northwest Territories', 'Nunavut',
+]);
+const CNA_NORTH_AMERICA_COUNTRIES = new Set([
+  'Mexico', 'Guatemala', 'Honduras', 'El Salvador', 'Nicaragua', 'Costa Rica', 'Panama',
+]);
+const COUNTRY_NAME_ALIASES = new Map([
+  ['United States of America', 'USA'],
+  ['Russian Federation', 'Russia'],
+  ['The Gambia', 'Gambia'],
+  ['Cote d\'Ivoire', 'Ivory Coast'],
+  ['Côte d\'Ivoire', 'Ivory Coast'],
+  ['Eswatini', 'eSwatini'],
+  ['Swaziland', 'eSwatini'],
+  ['United Republic of Tanzania', 'Tanzania'],
+  ['Republic of the Congo', 'Republic of the Congo'],
+]);
+const CARIBBEAN_SOURCE_PREFIXES = [
+  'KP1', 'KP2', 'KP4', 'WP4', 'NP4', 'VP9', 'CO', 'CM', 'HH', 'HI',
+  '6Y', '8P', '9Y', 'J3', 'J6', 'V2', 'V4', 'FG', 'FM', 'FS', 'PJ2', 'PJ4',
+].sort((a, b) => b.length - a.length);
+const WORLD_LANDMASSES = {
+  NA: [
+    [-168, 72], [-152, 62], [-135, 56], [-122, 50], [-108, 50], [-96, 46],
+    [-84, 30], [-82, 24], [-96, 16], [-112, 22], [-128, 30], [-138, 42],
+    [-152, 54], [-165, 66],
+  ],
+  SA: [
+    [-82, 12], [-74, 8], [-68, -2], [-64, -15], [-60, -28], [-62, -42],
+    [-70, -55], [-76, -46], [-80, -30], [-82, -12],
+  ],
+  EU: [
+    [-11, 36], [0, 43], [12, 49], [22, 53], [34, 58], [30, 66],
+    [16, 64], [6, 58], [-2, 52], [-9, 44],
+  ],
+  AF: [
+    [-18, 35], [2, 35], [20, 30], [35, 20], [46, 4], [42, -17],
+    [32, -35], [12, -35], [-2, -29], [-11, -12], [-16, 8], [-18, 24],
+  ],
+  AS: [
+    [35, 5], [50, 10], [66, 20], [82, 24], [98, 20], [112, 30],
+    [126, 40], [142, 50], [162, 58], [172, 50], [162, 34], [148, 20],
+    [132, 10], [114, 2], [96, -4], [76, -1], [60, 1], [46, 3],
+  ],
+  OC: [
+    [110, -11], [124, -16], [138, -24], [153, -31], [150, -42], [134, -45],
+    [120, -40], [112, -29],
+  ],
+  CAR: [
+    [-88, 24], [-82, 28], [-70, 27], [-61, 22], [-60, 14], [-66, 10],
+    [-76, 10], [-84, 15], [-88, 20],
+  ],
+};
 
 // ── Mode normalisation ────────────────────────────────────────────────────────
 function normaliseMode(raw) {
@@ -64,7 +244,16 @@ function normaliseMode(raw) {
 // ── Settings persistence ──────────────────────────────────────────────────────
 const Settings = {
   KEY: 'rbn_smeter_settings',
-  defaults: { mode: 'region', regionIndex: 0, grid: '', radiusIndex: 2, unit: 'auto', autoUpdate: false },
+  defaults: {
+    mode: 'region',
+    regionIndex: 0,
+    grid: '',
+    radiusIndex: 2,
+    unit: 'auto',
+    theme: 'dark',
+    autoUpdate: false,
+    desktopCollapsed: [],
+  },
   load() {
     try { return { ...this.defaults, ...JSON.parse(localStorage.getItem(this.KEY) || '{}') }; }
     catch { return { ...this.defaults }; }
@@ -73,6 +262,51 @@ const Settings = {
     try { localStorage.setItem(this.KEY, JSON.stringify(obj)); } catch {}
   },
 };
+
+function readThemeColorVar(varName, fallback) {
+  if (!document.body) return fallback;
+  const v = getComputedStyle(document.body).getPropertyValue(varName).trim();
+  return v || fallback;
+}
+
+function buildThemeMeterPalette() {
+  const green = readThemeColorVar('--green', '#00d250');
+  const yellow = readThemeColorVar('--yellow', '#e6c800');
+  const orange = readThemeColorVar('--orange', '#ff8c00');
+  const red = readThemeColorVar('--red', '#dc1e1e');
+  const pkGreen = readThemeColorVar('--pk-green', '#005a22');
+  const pkYellow = readThemeColorVar('--pk-yellow', '#645500');
+  const pkOrange = readThemeColorVar('--pk-orange', '#723c00');
+  const pkRed = readThemeColorVar('--pk-red', '#641212');
+  const dimmed = readThemeColorVar('--dimmed', '#1c1c32');
+  return {
+    live: [green, green, green, green, green, green, green, green, green, yellow, yellow, yellow, orange, red, red],
+    peak: [pkGreen, pkGreen, pkGreen, pkGreen, pkGreen, pkGreen, pkGreen, pkGreen, pkGreen, pkYellow, pkYellow, pkYellow, pkOrange, pkRed, pkRed],
+    quality: [green, yellow, orange, red],
+    dimmed,
+  };
+}
+
+function applyMeterPalette() {
+  meterPalette = buildThemeMeterPalette();
+  if (Array.isArray(meters) && meters.length) refreshUI(latestModeQualityByBand);
+}
+
+function applyTheme(themeName) {
+  const nextTheme = SUPPORTED_THEMES.has(themeName) ? themeName : 'dark';
+  if (!document.body) return;
+  document.body.classList.remove('theme-dark', 'theme-light', 'theme-cb');
+  document.body.classList.add(`theme-${nextTheme}`);
+  const darkBtn = document.getElementById('theme-dark');
+  const lightBtn = document.getElementById('theme-light');
+  const cbBtn = document.getElementById('theme-cb');
+  if (darkBtn) darkBtn.classList.toggle('active', nextTheme === 'dark');
+  if (lightBtn) lightBtn.classList.toggle('active', nextTheme === 'light');
+  if (cbBtn) cbBtn.classList.toggle('active', nextTheme === 'cb');
+  if (themeColorMeta) themeColorMeta.setAttribute('content', THEME_META_COLORS[nextTheme] || THEME_META_COLORS.dark);
+  currentTheme = nextTheme;
+  applyMeterPalette();
+}
 
 // ── Maidenhead grid → lat/lon ─────────────────────────────────────────────────
 function gridToLatLon(grid) {
@@ -118,6 +352,397 @@ function distanceMiles(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
+function normalizeLonDelta(delta) {
+  let out = delta;
+  while (out > 180) out -= 360;
+  while (out < -180) out += 360;
+  return out;
+}
+
+function prepareHiDPICanvas(canvas) {
+  if (!canvas) return null;
+  const cssW = Math.max(1, Math.round(canvas.clientWidth));
+  const cssH = Math.max(1, Math.round(canvas.clientHeight));
+  if (cssW < 2 || cssH < 2) return null;
+  const dpr = window.devicePixelRatio || 1;
+  const pxW = Math.max(1, Math.round(cssW * dpr));
+  const pxH = Math.max(1, Math.round(cssH * dpr));
+  if (canvas.width !== pxW || canvas.height !== pxH) {
+    canvas.width = pxW;
+    canvas.height = pxH;
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  return { ctx, w: cssW, h: cssH };
+}
+
+function drawMapBackground(ctx, w, h) {
+  ctx.fillStyle = 'rgba(10, 16, 28, 0.92)';
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = 'rgba(0, 212, 170, 0.16)';
+  ctx.lineWidth = 1;
+}
+
+function drawGeoGrid(ctx, w, h, project, lonStep, latStep) {
+  ctx.strokeStyle = 'rgba(0, 212, 170, 0.12)';
+  ctx.lineWidth = 1;
+  for (let lon = -180; lon <= 180; lon += lonStep) {
+    const a = project(lon, -85);
+    const b = project(lon, 85);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+  for (let lat = -60; lat <= 60; lat += latStep) {
+    const a = project(-180, lat);
+    const b = project(180, lat);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+}
+
+function drawPolygon(ctx, points, project, fillStyle, strokeStyle, lineWidth = 1) {
+  if (!points || points.length < 3) return;
+  ctx.beginPath();
+  points.forEach(([lon, lat], i) => {
+    const p = project(lon, lat);
+    if (i === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  });
+  ctx.closePath();
+  if (fillStyle) {
+    ctx.fillStyle = fillStyle;
+    ctx.fill();
+  }
+  if (strokeStyle) {
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+  }
+}
+
+function flattenGeoCoordinates(coords, out = []) {
+  if (!Array.isArray(coords) || coords.length === 0) return out;
+  if (Array.isArray(coords[0]) && typeof coords[0][0] === 'number') {
+    const ring = coords
+      .map(([lon, lat]) => [Number(lon), Number(lat)])
+      .filter(([lon, lat]) => Number.isFinite(lon) && Number.isFinite(lat));
+    if (ring.length >= 3) out.push(ring);
+    return out;
+  }
+  coords.forEach((child) => flattenGeoCoordinates(child, out));
+  return out;
+}
+
+function extractDetailedPolygons(geojson) {
+  const features = Array.isArray(geojson?.features) ? geojson.features : [];
+  const polygons = [];
+  features.forEach((feature) => {
+    const coords = feature?.geometry?.coordinates;
+    if (!coords) return;
+    flattenGeoCoordinates(coords, polygons);
+  });
+  return polygons.length > 0 ? polygons : null;
+}
+
+function countryNameForFeature(feature) {
+  return String(
+    feature?.properties?.name ||
+    feature?.properties?.NAME ||
+    feature?.properties?.admin ||
+    feature?.properties?.ADMIN ||
+    ''
+  ).trim();
+}
+
+function canonicalCountryName(name) {
+  const raw = String(name || '').trim();
+  return COUNTRY_NAME_ALIASES.get(raw) || raw;
+}
+
+function pushRegionPolygons(regionMap, regionKey, rings) {
+  if (!regionMap[regionKey]) regionMap[regionKey] = [];
+  rings.forEach((ring) => regionMap[regionKey].push(ring));
+}
+
+function assignRegionKeyForCountry(name) {
+  const canon = canonicalCountryName(name);
+  if (!canon) return null;
+  if (CARIBBEAN_COUNTRIES.has(canon)) return 'CAR';
+  if (SOUTH_AMERICA_COUNTRIES.has(canon)) return 'SA';
+  if (NORTH_AMERICA_COUNTRIES.has(canon)) return 'NA';
+  if (EUROPE_COUNTRIES.has(canon)) return 'EU';
+  if (AFRICA_COUNTRIES.has(canon)) return 'AF';
+  if (OCEANIA_COUNTRIES.has(canon)) return 'OC';
+  return 'AS';
+}
+
+function extractNamedPolygons(geojson) {
+  const features = Array.isArray(geojson?.features) ? geojson.features : [];
+  const named = {};
+  features.forEach((feature) => {
+    const coords = feature?.geometry?.coordinates;
+    if (!coords) return;
+    const rings = flattenGeoCoordinates(coords, []);
+    if (!rings.length) return;
+    const name = canonicalCountryName(countryNameForFeature(feature));
+    if (!name) return;
+    named[name] ??= [];
+    rings.forEach((ring) => named[name].push(ring));
+  });
+  return named;
+}
+
+async function fetchGeoJsonFromSources(sources, timeoutMs = 7000) {
+  for (const url of sources) {
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      if (Array.isArray(data?.features) && data.features.length > 0) return data;
+    } catch {}
+  }
+  return null;
+}
+
+function collectPolygonsForNames(namedPolygons, names) {
+  const out = [];
+  names.forEach((name) => {
+    const canon = canonicalCountryName(name);
+    if (namedPolygons[canon]) out.push(...namedPolygons[canon]);
+  });
+  return out;
+}
+
+function extractRegionPolygons(geojson) {
+  const features = Array.isArray(geojson?.features) ? geojson.features : [];
+  const regionMap = { NA: [], SA: [], EU: [], AF: [], AS: [], OC: [], CAR: [] };
+  features.forEach((feature) => {
+    const coords = feature?.geometry?.coordinates;
+    if (!coords) return;
+    const rings = flattenGeoCoordinates(coords, []);
+    if (!rings.length) return;
+    const country = countryNameForFeature(feature);
+    const regionKey = assignRegionKeyForCountry(country);
+    if (!regionKey) return;
+    pushRegionPolygons(regionMap, regionKey, rings);
+  });
+  return regionMap;
+}
+
+async function loadDetailedNorthAmericaSplitPolygons(worldGeojson) {
+  const worldNamed = extractNamedPolygons(worldGeojson);
+  const split = { ENA: [], CNA: [], WNA: [] };
+
+  // Country-level portions of North America in this model.
+  split.CNA.push(...collectPolygonsForNames(worldNamed, CNA_NORTH_AMERICA_COUNTRIES));
+  split.WNA.push(...collectPolygonsForNames(worldNamed, new Set(['Greenland'])));
+
+  const [usStatesGeo, canadaGeo] = await Promise.all([
+    fetchGeoJsonFromSources(US_STATES_GEOJSON_SOURCES),
+    fetchGeoJsonFromSources(CANADA_PROVINCES_GEOJSON_SOURCES),
+  ]);
+
+  if (usStatesGeo) {
+    const usNamed = extractNamedPolygons(usStatesGeo);
+    split.ENA.push(...collectPolygonsForNames(usNamed, ENA_US_STATES));
+    split.CNA.push(...collectPolygonsForNames(usNamed, CNA_US_STATES));
+    split.WNA.push(...collectPolygonsForNames(usNamed, WNA_US_STATES));
+  }
+  if (canadaGeo) {
+    const caNamed = extractNamedPolygons(canadaGeo);
+    split.ENA.push(...collectPolygonsForNames(caNamed, ENA_CANADA_PROVINCES));
+    split.CNA.push(...collectPolygonsForNames(caNamed, CNA_CANADA_PROVINCES));
+    split.WNA.push(...collectPolygonsForNames(caNamed, WNA_CANADA_PROVINCES));
+  }
+
+  if (split.ENA.length === 0 || split.CNA.length === 0 || split.WNA.length === 0) return null;
+  return split;
+}
+
+async function loadDetailedWorldPolygons() {
+  if (detailedWorldPolygons) return detailedWorldPolygons;
+  if (detailedWorldLoadPromise) return detailedWorldLoadPromise;
+  if (detailedWorldLoadFailed) return null;
+
+  detailedWorldLoadPromise = (async () => {
+    for (const url of WORLD_GEOJSON_SOURCES) {
+      try {
+        const resp = await fetch(url, { signal: AbortSignal.timeout(7000) });
+        if (!resp.ok) continue;
+        const data = await resp.json();
+        const polygons = extractDetailedPolygons(data);
+        if (polygons && polygons.length > 0) {
+          detailedWorldPolygons = polygons;
+          detailedWorldRegionPolygons = extractRegionPolygons(data);
+          detailedNorthAmericaSplitPolygons = await loadDetailedNorthAmericaSplitPolygons(data);
+          detailedWorldLoadFailed = false;
+          return detailedWorldPolygons;
+        }
+      } catch {}
+    }
+    detailedWorldLoadFailed = true;
+    return null;
+  })().finally(() => {
+    detailedWorldLoadPromise = null;
+  });
+
+  return detailedWorldLoadPromise;
+}
+
+function drawWorldLandmasses(ctx, project, fillAlpha = 0.24, strokeAlpha = 0.46) {
+  const polygons = detailedWorldPolygons || Object.values(WORLD_LANDMASSES);
+  polygons.forEach((points) => {
+    drawPolygon(
+      ctx,
+      points,
+      project,
+      `rgba(0, 210, 80, ${fillAlpha})`,
+      `rgba(0, 169, 107, ${strokeAlpha})`,
+      1,
+    );
+  });
+}
+
+function drawHighlightedRegion(ctx, project, regionKey, regionIdx, w, h) {
+  const regionPolys = detailedWorldRegionPolygons?.[regionKey] || null;
+  const highlightFill = 'rgba(0, 210, 80, 0.78)';
+  const highlightStroke = 'rgba(0, 169, 107, 0.95)';
+  const sourceRegionKey = SOURCE_REGION_KEYS[regionIdx];
+  const naSplitPolys = (sourceRegionKey === 'ENA' || sourceRegionKey === 'CNA' || sourceRegionKey === 'WNA')
+    ? detailedNorthAmericaSplitPolygons?.[sourceRegionKey]
+    : null;
+  const naLonSplitByRegion = {
+    2: [-130, -103], // W. North America (unchanged right edge relative to prior split)
+    1: [-103, -85],  // C. North America (~300 miles wider)
+    0: [-85, -52],   // E. North America (left edge moved east ~500 miles, extends to coast/ocean)
+  };
+
+  if (naSplitPolys && naSplitPolys.length > 0) {
+    naSplitPolys.forEach((ring) => drawPolygon(ctx, ring, project, highlightFill, highlightStroke, 1.6));
+    return;
+  }
+
+  if (regionPolys && regionPolys.length > 0) {
+    if (regionKey === 'NA' && regionIdx >= 0 && regionIdx <= 2) {
+      const split = naLonSplitByRegion[regionIdx];
+      if (split) {
+        const [lo, hi] = split;
+        const xLo = project(lo, 0).x;
+        const xHi = project(hi, 0).x;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(Math.min(xLo, xHi), 0, Math.abs(xHi - xLo), h);
+        ctx.clip();
+        regionPolys.forEach((ring) => drawPolygon(ctx, ring, project, highlightFill, highlightStroke, 1.6));
+        ctx.restore();
+      } else {
+        regionPolys.forEach((ring) => drawPolygon(ctx, ring, project, highlightFill, highlightStroke, 1.6));
+      }
+    } else {
+      regionPolys.forEach((ring) => drawPolygon(ctx, ring, project, highlightFill, highlightStroke, 1.6));
+    }
+    return;
+  }
+
+  const points = WORLD_LANDMASSES[regionKey];
+  if (!points) return;
+  if (regionKey === 'NA' && regionIdx >= 0 && regionIdx <= 2) {
+    const split = naLonSplitByRegion[regionIdx];
+    if (split) {
+      const [lo, hi] = split;
+      const xLo = project(lo, 0).x;
+      const xHi = project(hi, 0).x;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(Math.min(xLo, xHi), 0, Math.abs(xHi - xLo), h);
+      ctx.clip();
+      drawPolygon(ctx, points, project, highlightFill, highlightStroke, 1.6);
+      ctx.restore();
+      return;
+    }
+  }
+  drawPolygon(ctx, points, project, highlightFill, highlightStroke, 1.6);
+}
+
+function drawRegionVantageMap(canvas, regionIdx) {
+  const setup = prepareHiDPICanvas(canvas);
+  if (!setup) return;
+  const { ctx, w, h } = setup;
+  const project = (lon, lat) => ({
+    x: ((lon + 180) / 360) * w,
+    y: ((90 - lat) / 180) * h,
+  });
+  drawMapBackground(ctx, w, h);
+  drawGeoGrid(ctx, w, h, project, 30, 20);
+  drawWorldLandmasses(ctx, project, 0.15, 0.25);
+  const landKey = REGION_LAND_KEY[regionIdx] || 'NA';
+  drawHighlightedRegion(ctx, project, landKey, regionIdx, w, h);
+}
+
+function drawGridVantageMap(canvas, grid, radiusMiles, radiusLabel) {
+  const setup = prepareHiDPICanvas(canvas);
+  if (!setup) return;
+  const { ctx, w, h } = setup;
+  const center = gridToLatLon(grid);
+  drawMapBackground(ctx, w, h);
+
+  if (!center) {
+    const project = (lon, lat) => ({ x: ((lon + 180) / 360) * w, y: ((90 - lat) / 180) * h });
+    drawGeoGrid(ctx, w, h, project, 60, 30);
+    drawWorldLandmasses(ctx, project, 0.22, 0.38);
+    ctx.fillStyle = 'rgba(255,255,255,0.86)';
+    ctx.font = '12px "Share Tech Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Enter valid grid square', w / 2, h / 2);
+    return;
+  }
+
+  const radiusDegLat = Math.max(0.5, radiusMiles / 69);
+  const radiusPxAt1x = radiusDegLat * (h / 180);
+  const targetRadiusPx = Math.max(26, Math.min(78, h * 0.24));
+  const zoom = Math.max(1, Math.min(7, targetRadiusPx / Math.max(radiusPxAt1x, 1)));
+  const lonScale = (w / 360) * zoom;
+  const latScale = (h / 180) * zoom;
+  const project = (lon, lat) => ({
+    x: w / 2 + normalizeLonDelta(lon - center.lon) * lonScale,
+    y: h / 2 - (lat - center.lat) * latScale,
+  });
+
+  const lonStep = zoom >= 3.2 ? 15 : (zoom >= 1.8 ? 30 : 60);
+  const latStep = zoom >= 3.2 ? 10 : (zoom >= 1.8 ? 20 : 30);
+  drawGeoGrid(ctx, w, h, project, lonStep, latStep);
+  drawWorldLandmasses(ctx, project, 0.26, 0.42);
+
+  const radiusPx = Math.max(4, radiusDegLat * latScale);
+  ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.arc(w / 2, h / 2, radiusPx, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.fillStyle = VANTAGE_GRID_COLOR;
+  ctx.beginPath();
+  ctx.arc(w / 2, h / 2, 3.8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  const lx = Math.min(w - 8, w / 2 + radiusPx + 10);
+  const ly = Math.max(14, h / 2 - 8);
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(255,255,255,0.94)';
+  ctx.font = 'bold 12px "Share Tech Mono", monospace';
+  ctx.fillText(grid.toUpperCase(), lx, ly);
+  ctx.font = '11px "Share Tech Mono", monospace';
+  ctx.fillText(radiusLabel, lx, ly + 14);
+}
+
 // ── S-unit label ──────────────────────────────────────────────────────────────
 function snrToSUnit(snr) {
   if (snr <  1) return 'S0';
@@ -144,10 +769,11 @@ function median(nums) {
 function qualityColorForSnr(snr) {
   if (snr == null) return null;
   const frac = Math.max(0, Math.min(snr / MAX_SNR, 1));
-  if (frac < 0.60) return '#00d250';
-  if (frac < 0.80) return '#e6c800';
-  if (frac < 0.90) return '#ff8c00';
-  return '#dc1e1e';
+  const q = meterPalette.quality || DEFAULT_MODE_QUALITY_COLORS;
+  if (frac < 0.60) return q[0] || DEFAULT_MODE_QUALITY_COLORS[0];
+  if (frac < 0.80) return q[1] || DEFAULT_MODE_QUALITY_COLORS[1];
+  if (frac < 0.90) return q[2] || DEFAULT_MODE_QUALITY_COLORS[2];
+  return q[3] || DEFAULT_MODE_QUALITY_COLORS[3];
 }
 
 function qualityFractionForMode(modeKey, snr) {
@@ -172,8 +798,30 @@ function ftxSnrToRbnScale(ftxSnr) {
   return 2 + frac * 20;
 }
 
-function regionKeyForIndex(idx) {
-  return REGION_KEYS[idx] || REGION_KEYS[0];
+function sourceRegionKeyForIndex(idx) {
+  if (!Number.isInteger(idx) || idx < 0 || idx >= SOURCE_REGION_KEYS.length) return null;
+  return SOURCE_REGION_KEYS[idx];
+}
+
+function targetRegionKeyForIndex(idx) {
+  if (!Number.isInteger(idx) || idx < 0 || idx >= REGION_KEYS.length) return null;
+  return REGION_KEYS[idx];
+}
+
+function sourceRegionKeyForCallsign(call) {
+  const regionIdx = classifyCallsign(call);
+  if (regionIdx < 0) return null;
+  if (regionIdx === 0 && isCaribbeanSourceCallsign(call)) return 'CAR';
+  return REGION_KEYS[regionIdx] || null;
+}
+
+function gridCellKeyFromLatLon(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  // Same granularity as Maidenhead 4-char cells used in PSK reports.
+  const lonCell = Math.floor((lon + 180) / 2);
+  const latCell = Math.floor((lat + 90) / 1);
+  if (!Number.isFinite(lonCell) || !Number.isFinite(latCell)) return null;
+  return `${lonCell},${latCell}`;
 }
 
 function createModeSampleCube() {
@@ -217,16 +865,16 @@ function collapseModeSamples(modeCube, meterState) {
 
 // ── Region classifier ─────────────────────────────────────────────────────────
 const PREFIX_TABLE = [
-  ['W1',0],['W2',0],['W3',0],['W4',0],['W8',0],['W9',0],
-  ['K1',0],['K2',0],['K3',0],['K4',0],['K8',0],['K9',0],
-  ['N1',0],['N2',0],['N3',0],['N4',0],['N8',0],['N9',0],
+  ['W1',0],['W2',0],['W3',0],['W4',0],['W8',0],
+  ['K1',0],['K2',0],['K3',0],['K4',0],['K8',0],
+  ['N1',0],['N2',0],['N3',0],['N4',0],['N8',0],
   ['VE1',0],['VE2',0],['VE3',0],['VE9',0],['VA1',0],['VA2',0],['VA3',0],['VY2',0],
   ['KP2',0],['KP4',0],['WP4',0],['NP4',0],['VP9',0],['CO',0],['CM',0],['HH',0],['HI',0],
-  ['W0',1],['W5',1],['K0',1],['K5',1],['N0',1],['N5',1],
-  ['VE4',1],['VE5',1],['VA4',1],['VA5',1],['XE',1],['XF',1],
+  ['W0',1],['W5',1],['W9',1],['K0',1],['K5',1],['K9',1],['N0',1],['N5',1],['N9',1],
+  ['VE4',1],['VE5',1],['VE6',1],['VA4',1],['VA5',1],['VA6',1],['XE',1],['XF',1],
   ['TI',1],['YN',1],['HR',1],['TG',1],['YS',1],
   ['W6',2],['W7',2],['K6',2],['K7',2],['N6',2],['N7',2],
-  ['VE6',2],['VE7',2],['VA6',2],['VA7',2],['VY1',2],
+  ['VE7',2],['VA7',2],['VY1',2],
   ['KH6',2],['NH6',2],['WH6',2],['KL',2],['WL',2],['NL',2],['AL',2],
   ['PY',3],['PP',3],['LU',3],['CE',3],['OA',3],['HC',3],['HK',3],
   ['YV',3],['YW',3],['CX',3],['ZP',3],['CP',3],['GY',3],['PZ',3],['FY',3],['VP8',3],
@@ -265,7 +913,7 @@ function classifyCallsign(call) {
     for (const ch of c) {
       if (ch >= '0' && ch <= '9') {
         const d = parseInt(ch);
-        if (d === 0 || d === 5) return 1;
+        if (d === 0 || d === 5 || d === 9) return 1;
         if (d === 6 || d === 7) return 2;
         return 0;
       }
@@ -274,22 +922,31 @@ function classifyCallsign(call) {
   return -1;
 }
 
+function isCaribbeanSourceCallsign(call) {
+  const u = String(call || '').toUpperCase();
+  if (!u) return false;
+  const base = u.includes('/') ? u.split('/')[0] : u;
+  return CARIBBEAN_SOURCE_PREFIXES.some((pfx) => base.startsWith(pfx));
+}
+
 function regionFromLatLon(lat, lon) {
+  const dCar = distanceMiles(lat, lon, CARIBBEAN_CENTER.lat, CARIBBEAN_CENTER.lon);
+  if (dCar <= CARIBBEAN_CENTER.radiusMiles && lat >= 8 && lat <= 30 && lon >= -92 && lon <= -56) return CARIBBEAN_REGION_INDEX;
   if (lat > 15 && lon >= -170 && lon <= -50) {
     if (lon >= -85)  return 0;
     if (lon >= -105) return 1;
     return 2;
   }
-  if (lat >= -60 && lat <= 15 && lon >= -82 && lon <= -34) return 3;
-  if (lat >= 35  && lat <= 72 && lon >= -12 && lon <= 45)  return 4;
-  if (lat >= -35 && lat <= 40 && lon >= -20 && lon <= 55)  return 5;
-  if (lat >= -10 && lat <= 75 && lon >= 45)                return 6;
-  if (lat <= 0   && lon >= 100)                            return 7;
-  return 0;
+  if (lat >= -60 && lat <= 15 && lon >= -82 && lon <= -34) return 4;
+  if (lat >= 35  && lat <= 72 && lon >= -12 && lon <= 45)  return 5;
+  if (lat >= -35 && lat <= 40 && lon >= -20 && lon <= 55)  return 6;
+  if (lat >= -10 && lat <= 75 && lon >= 45)                return 7;
+  if (lat <= 0   && lon >= 100)                            return 8;
+  return -1;
 }
 
 function regionKeyFromLatLon(lat, lon) {
-  return regionKeyForIndex(regionFromLatLon(lat, lon));
+  return sourceRegionKeyForIndex(regionFromLatLon(lat, lon));
 }
 
 // ── Spotter cache ─────────────────────────────────────────────────────────────
@@ -481,14 +1138,21 @@ function drawBar(canvas, hasData, snr, peak) {
   const peakN  = Math.min(peak / MAX_SNR, 1);
   const litSeg = Math.round(liveN * SEG_COUNT);
   const pkSeg  = Math.round(peakN * SEG_COUNT);
+  const dimmedColor = meterPalette.dimmed || '#1c1c32';
+  const liveColors = Array.isArray(meterPalette.live) && meterPalette.live.length === SEG_COUNT
+    ? meterPalette.live
+    : SEG_COLORS.live;
+  const peakColors = Array.isArray(meterPalette.peak) && meterPalette.peak.length === SEG_COUNT
+    ? meterPalette.peak
+    : SEG_COLORS.peak;
   for (let i = 0; i < SEG_COUNT; i++) {
     const x    = i * (segW + gapW);
     const lit  = i < litSeg;
     const inPk = !lit && i < pkSeg;
-    if (!hasData)   ctx.fillStyle = '#1c1c32';
-    else if (lit)   ctx.fillStyle = SEG_COLORS.live[i];
-    else if (inPk)  ctx.fillStyle = SEG_COLORS.peak[i];
-    else            ctx.fillStyle = '#1c1c32';
+    if (!hasData)   ctx.fillStyle = dimmedColor;
+    else if (lit)   ctx.fillStyle = liveColors[i];
+    else if (inPk)  ctx.fillStyle = peakColors[i];
+    else            ctx.fillStyle = dimmedColor;
     ctx.fillRect(x, 0, segW, h);
   }
 }
@@ -503,11 +1167,13 @@ const DISPLAY_MODES = [
   { abbr: 'FTx', sources: ['FT8','FT4'], isSSB: false },
 ];
 const MODE_QUALITY_KEY = { CW: 'CW', RY: 'RTTY', FTx: 'FTx', SSB: 'SSB' };
-const MODE_QUALITY_COLORS = ['#00d250', '#e6c800', '#ff8c00', '#dc1e1e'];
 
 function buildQualityTrack(frac, enabled) {
   const track = document.createElement('span');
   track.className = 'mode-quality-track';
+  const qualityColors = Array.isArray(meterPalette.quality) && meterPalette.quality.length === 4
+    ? meterPalette.quality
+    : DEFAULT_MODE_QUALITY_COLORS;
   for (let i = 0; i < 4; i++) {
     const seg = document.createElement('span');
     seg.className = 'mode-quality-seg';
@@ -521,7 +1187,7 @@ function buildQualityTrack(frac, enabled) {
       else if (frac > start) fill = (frac - start) / 0.25;
     }
     const fillPct = Math.round(fill * 100);
-    const c = MODE_QUALITY_COLORS[i];
+    const c = qualityColors[i] || DEFAULT_MODE_QUALITY_COLORS[i];
     fillEl.style.width = `${fillPct}%`;
     fillEl.style.backgroundColor = c;
     seg.appendChild(fillEl);
@@ -574,6 +1240,10 @@ const canvases     = []; // [regionIdx][bandIdx]
 const sUnits       = []; // [regionIdx][bandIdx]
 const footers      = []; // [regionIdx]
 const deskModeRows = []; // [regionIdx][bandIdx]
+const deskPanels   = []; // [regionIdx]
+const deskHeaders  = []; // [regionIdx]
+const deskHeaderNames = []; // [regionIdx]
+const deskPills    = []; // [regionIdx][bandIdx]
 
 // Phone refs
 const accCanvases = []; // [regionIdx][bandIdx]
@@ -582,20 +1252,99 @@ const accFooters  = []; // [regionIdx]
 const accPills    = []; // [regionIdx][bandIdx]
 const accModeRows = []; // [regionIdx][bandIdx]
 
+let desktopCollapsed = Array.from({ length: REGIONS.length }, () => false);
+
+function normaliseDesktopCollapsed(raw) {
+  const out = Array.from({ length: REGIONS.length }, () => false);
+  if (!Array.isArray(raw)) return out;
+  raw.forEach((idx) => {
+    const i = Number(idx);
+    if (Number.isInteger(i) && i >= 0 && i < REGIONS.length) out[i] = true;
+  });
+  return out;
+}
+
+function collapsedDesktopIndexes() {
+  const out = [];
+  desktopCollapsed.forEach((v, idx) => { if (v) out.push(idx); });
+  return out;
+}
+
+function setDesktopPanelCollapsed(regionIdx, collapsed, shouldSave = true) {
+  desktopCollapsed[regionIdx] = !!collapsed;
+  const panel = deskPanels[regionIdx];
+  const hdr = deskHeaders[regionIdx];
+  const hdrName = deskHeaderNames[regionIdx];
+  const longName = DESKTOP_REGION_TITLES[regionIdx] || REGIONS[regionIdx] || '';
+  const twoLineName = DESKTOP_REGION_TITLE_LINES[regionIdx] || longName;
+  if (panel) panel.classList.toggle('collapsed', desktopCollapsed[regionIdx]);
+  if (hdr) hdr.setAttribute('aria-expanded', String(!desktopCollapsed[regionIdx]));
+  if (hdrName) {
+    hdrName.textContent = desktopCollapsed[regionIdx] ? (REGION_KEYS[regionIdx] || longName) : twoLineName;
+    hdrName.title = longName;
+  }
+  if (shouldSave) saveSettings();
+}
+
+function applyDesktopCollapseState() {
+  for (let ri = 0; ri < REGIONS.length; ri++) {
+    setDesktopPanelCollapsed(ri, desktopCollapsed[ri], false);
+  }
+}
+
+function updateSummaryPill(pill, bandIdx, hasData, snr, className) {
+  if (!pill) return;
+  const bandFull = BANDS[bandIdx].label;
+  const compactBand = bandFull.endsWith('m') ? bandFull.slice(0, -1) : bandFull;
+  const pillBand = className === 'desk-pill' ? compactBand : bandFull;
+  if (hasData) {
+    pill.textContent = `${pillBand} ${snrToSUnit(snr)}`;
+    pill.className = className;
+  } else {
+    pill.textContent = pillBand;
+    pill.className = `${className} no-data`;
+  }
+}
+
 // ── Build desktop panels ──────────────────────────────────────────────────────
 function buildDesktopPanels() {
   const grid = document.getElementById('meters-grid');
   grid.innerHTML = '';
   canvases.length = 0; sUnits.length = 0; footers.length = 0; deskModeRows.length = 0;
+  deskPanels.length = 0; deskHeaders.length = 0; deskHeaderNames.length = 0; deskPills.length = 0;
 
-  REGIONS.forEach((name, ri) => {
+  REGIONS.forEach((_, ri) => {
+    const title = DESKTOP_REGION_TITLES[ri] || REGIONS[ri];
+    const titleTwoLine = DESKTOP_REGION_TITLE_LINES[ri] || title;
     const panel = document.createElement('div');
     panel.className = 'region-panel';
 
     const hdr = document.createElement('div');
-    hdr.className   = 'region-header';
-    hdr.textContent = name;
+    hdr.className = 'region-header';
+    hdr.setAttribute('role', 'button');
+    hdr.setAttribute('tabindex', '0');
+    const hdrName = document.createElement('span');
+    hdrName.className = 'region-header-name';
+    hdrName.textContent = titleTwoLine;
+    hdrName.title = title;
+    const hdrChevron = document.createElement('span');
+    hdrChevron.className = 'region-header-chevron';
+    hdrChevron.textContent = '▼';
+    hdr.appendChild(hdrName);
+    hdr.appendChild(hdrChevron);
     panel.appendChild(hdr);
+
+    const summary = document.createElement('div');
+    summary.className = 'desk-summary';
+    const rp = [];
+    BANDS.forEach((band) => {
+      const pill = document.createElement('span');
+      pill.className = 'desk-pill no-data';
+      pill.textContent = band.label;
+      summary.appendChild(pill);
+      rp.push(pill);
+    });
+    panel.appendChild(summary);
 
     const rows = document.createElement('div');
     rows.className = 'band-rows';
@@ -646,6 +1395,20 @@ function buildDesktopPanels() {
     sUnits.push(rs);
     footers.push(ftr);
     deskModeRows.push(rmDesk);
+    deskPanels.push(panel);
+    deskHeaders.push(hdr);
+    deskHeaderNames.push(hdrName);
+    deskPills.push(rp);
+
+    const toggleCollapse = () => setDesktopPanelCollapsed(ri, !desktopCollapsed[ri]);
+    hdr.addEventListener('click', toggleCollapse);
+    hdr.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleCollapse();
+      }
+    });
+    setDesktopPanelCollapsed(ri, desktopCollapsed[ri], false);
   });
 
   requestAnimationFrame(() => {
@@ -775,6 +1538,8 @@ function buildPanels() {
 
 // ── Refresh both layouts ──────────────────────────────────────────────────────
 function refreshUI(modeQualityByBand = null) {
+  if (modeQualityByBand) latestModeQualityByBand = modeQualityByBand;
+  else modeQualityByBand = latestModeQualityByBand;
   meters.forEach((m, ri) => {
     BANDS.forEach((_, bi) => {
       const hasData = m.hasValue[bi];
@@ -806,12 +1571,16 @@ function refreshUI(modeQualityByBand = null) {
 
         const pill = accPills[ri][bi];
         if (hasData) {
-          pill.textContent = `${BANDS[bi].label} ${snrToSUnit(snr)}`;
-          pill.className   = 'acc-pill';
+          updateSummaryPill(pill, bi, true, snr, 'acc-pill');
         } else {
-          pill.textContent = BANDS[bi].label;
-          pill.className   = 'acc-pill no-data';
+          updateSummaryPill(pill, bi, false, snr, 'acc-pill');
         }
+      }
+
+      // Desktop collapsed summary pills
+      if (deskPills[ri]) {
+        const dp = deskPills[ri][bi];
+        updateSummaryPill(dp, bi, hasData, snr, 'desk-pill');
       }
 
       // Per-band mode rows
@@ -835,6 +1604,10 @@ let pollTimer    = null;
 let isRunning    = false;
 let geoWatchId   = null;
 let skimmerCount = 0;
+let pollInFlight = false;
+let pollPending = false;
+let refreshDebounceTimer = null;
+let refreshRevision = 0;
 
 function bandForFreq(khz) {
   const i = BANDS.findIndex(b => khz >= b.min && khz <= b.max);
@@ -857,7 +1630,17 @@ async function fetchPsk() {
   }
 }
 
-async function pollOnce() {
+async function pollOnce(revisionAtRequest = refreshRevision) {
+  if (!isRunning) return;
+  if (revisionAtRequest !== refreshRevision) return;
+  if (pollInFlight) {
+    pollPending = true;
+    return;
+  }
+  pollInFlight = true;
+  const activeRevision = revisionAtRequest;
+
+  try {
   const mode = document.querySelector('input[name="vantage-mode"]:checked').value;
 
   // Clear per-cycle mode sets
@@ -874,6 +1657,7 @@ async function pollOnce() {
   }
 
   const vantageRegion = parseInt(document.getElementById('region-select').value);
+  const rbnVantageRegionKey = sourceRegionKeyForIndex(vantageRegion);
   const vantageGrid   = document.getElementById('grid-input').value.trim().toUpperCase();
   const radiusMiles   = getRadiusMiles();
 
@@ -888,6 +1672,8 @@ async function pollOnce() {
   const sampled = Array.from({length: REGIONS.length}, () => new Uint8Array(BANDS.length));
   const regionSkimmers = new Set();
   const modeSamples = createModeSampleCube();
+  const ftxCallsigns = new Set();
+  let skimmerCallsigns = [];
 
   for (const [spotCall, spot] of Object.entries(data)) {
     if (!spot.lsn || typeof spot.lsn !== 'object') continue;
@@ -905,8 +1691,9 @@ async function pollOnce() {
       if (isNaN(snr)) continue;
 
       if (mode === 'region') {
-        const spotterRegion = classifyCallsign(listenerCall);
-        if (spotterRegion !== vantageRegion) continue;
+        if (!rbnVantageRegionKey) continue;
+        const spotterRegionKey = sourceRegionKeyForCallsign(listenerCall);
+        if (spotterRegionKey !== rbnVantageRegionKey) continue;
         regionSkimmers.add(listenerCall.toUpperCase().split('/')[0]);
         spotsFromVantage++;
         if (dxRegion < 0) { spotsUnknown++; continue; }
@@ -938,7 +1725,7 @@ async function pollOnce() {
       spotsProcessed++;
     }
     skimmerCount = skimmersInRadius.size;
-    updateSkimmerCount(skimmerCount, true);
+    skimmerCallsigns = Array.from(skimmersInRadius).sort();
 
     // If no skimmers heard within radius, clear all meters immediately
     // (don't rely on slow EMA decay — give instant feedback)
@@ -950,7 +1737,7 @@ async function pollOnce() {
   // Region mode skimmer count
   if (mode === 'region') {
     skimmerCount = regionSkimmers.size;
-    updateSkimmerCount(skimmerCount, false);
+    skimmerCallsigns = Array.from(regionSkimmers).sort();
   }
 
   // Fetch PSKReporter aggregate in parallel with final UI composition.
@@ -965,20 +1752,79 @@ async function pollOnce() {
 
   // Overlay FTx quality from PSKReporter by from/to region + band.
   const fromKey = mode === 'region'
-    ? regionKeyForIndex(vantageRegion)
-    : (gridLL ? regionKeyForIndex(regionFromLatLon(gridLL.lat, gridLL.lon)) : null);
+    ? sourceRegionKeyForIndex(vantageRegion)
+    : (gridLL ? sourceRegionKeyForIndex(regionFromLatLon(gridLL.lat, gridLL.lon)) : null);
+  let ftxReportsInQuery = 0;
+  const gridPskCallIncluded = new Set();
+  const pskGridCallCounts = {};
   if (fromKey && pskByRegion[fromKey]) {
     for (let ri = 0; ri < REGIONS.length; ri++) {
-      const toKey = regionKeyForIndex(ri);
+      const toKey = targetRegionKeyForIndex(ri);
       for (let bi = 0; bi < BANDS.length; bi++) {
         const pskEntry = pskByRegion[fromKey]?.[toKey]?.[BANDS[bi].label];
         if (pskEntry && typeof pskEntry.snr === 'number') {
           modeQualityByBand[ri][bi].FTx = pskEntry.snr;
+          if (typeof pskEntry.count === 'number' && pskEntry.count > 0 && mode !== 'grid')
+            ftxReportsInQuery += pskEntry.count;
+          if (mode === 'grid' && gridLL && Array.isArray(pskEntry.rxGridCounts)) {
+            pskEntry.rxGridCounts.forEach((entry) => {
+              if (!Array.isArray(entry) || entry.length < 2) return;
+              const cell = String(entry[0] || '').toUpperCase();
+              const count = Number(entry[1] || 0);
+              if (cell.length < 4 || !Number.isFinite(count) || count <= 0) return;
+              const ll = gridToLatLon(cell);
+              if (!ll) return;
+              const dist = distanceMiles(gridLL.lat, gridLL.lon, ll.lat, ll.lon);
+              if (dist > radiusMiles) return;
+              pskGridCallCounts[cell] = (pskGridCallCounts[cell] || 0) + count;
+            });
+          }
+          // For the Vantage FTx tooltip we want reporting receiver stations
+          // (same conceptual side as "skimmers"), never DX sender fallbacks.
+          const reporterCalls = Array.isArray(pskEntry.rxCalls) ? pskEntry.rxCalls : [];
+          if (Array.isArray(reporterCalls)) {
+            reporterCalls.forEach((c) => {
+              const s = String(c || '').trim().toUpperCase();
+              if (s) ftxCallsigns.add(s);
+            });
+          }
+
+          // Feed PSK FTx into the main S-meter: full fallback when RBN is absent,
+          // and a light blend when RBN data exists for the same cell.
+          const pskScaled = ftxSnrToRbnScale(pskEntry.snr);
+          if (pskScaled != null) {
+            const meter = meters[ri];
+            if (!sampled[ri][bi]) {
+              if (!meter.hasValue[bi] || meter.ema[bi] < pskScaled) meter.ema[bi] = pskScaled;
+              meter.hasValue[bi] = true;
+              if (meter.ema[bi] > meter.peak[bi]) meter.peak[bi] = meter.ema[bi];
+            } else if (meter.hasValue[bi]) {
+              const blended = meter.ema[bi] * 0.85 + pskScaled * 0.15;
+              meter.ema[bi] = blended;
+              if (blended > meter.peak[bi]) meter.peak[bi] = blended;
+            }
+          }
         }
       }
     }
   }
+  if (mode === 'grid') {
+    ftxReportsInQuery = 0;
+    Object.entries(pskGridCallCounts).forEach(([cell, count]) => {
+      if (gridPskCallIncluded.has(cell)) return;
+      gridPskCallIncluded.add(cell);
+      ftxReportsInQuery += count;
+    });
+  }
 
+  if (activeRevision !== refreshRevision) return;
+  updateSkimmerCount(
+    skimmerCount,
+    mode === 'grid',
+    ftxReportsInQuery,
+    skimmerCallsigns,
+    Array.from(ftxCallsigns).sort(),
+  );
   refreshUI(modeQualityByBand);
 
   const ts = new Date().toLocaleTimeString();
@@ -987,43 +1833,42 @@ async function pollOnce() {
     `Poll ${ts}  |  spots=${totalSpots}  vantage=${spotsFromVantage}  mapped=${spotsProcessed}  unk=${spotsUnknown}  ${pskInfo}`,
     spotsProcessed > 0 ? 'ok' : 'warn'
   );
+  } finally {
+    pollInFlight = false;
+    if (pollPending) {
+      pollPending = false;
+      queueMicrotask(() => pollOnce());
+    }
+  }
 }
 
 function startPolling() {
   if (isRunning) return;
-  const mode = document.querySelector('input[name="vantage-mode"]:checked').value;
-  if (mode === 'grid') {
-    const g = document.getElementById('grid-input').value.trim();
-    if (!isValidGrid(g)) {
-      setStatus('Please enter a valid grid square before starting.', 'error');
-      return;
-    }
-  }
   isRunning = true;
-  document.getElementById('btn-start').disabled = true;
-  document.getElementById('btn-stop').disabled  = false;
-  setStatus('Polling started — waiting for first data…', 'ok');
+  setStatus('Auto polling started.', 'ok');
   saveSettings();
-  pollOnce();
-  pollTimer = setInterval(pollOnce, POLL_MS);
+  pollOnce(refreshRevision);
+  pollTimer = setInterval(() => pollOnce(), POLL_MS);
 }
 
-function stopPolling() {
-  isRunning = false;
-  clearInterval(pollTimer);
-  pollTimer = null;
-  document.getElementById('btn-start').disabled = false;
-  document.getElementById('btn-stop').disabled  = true;
-  setStatus('Polling stopped.', 'warn');
-}
-
-function resetMeters() {
+function hardResetVantageData() {
   meters.forEach(m => m.reset());
   skimmerCount = 0;
-  const resetEl = document.getElementById('skimmer-count');
-  if (resetEl) { resetEl.textContent = ''; resetEl.className = 'skimmer-count'; }
-  refreshUI();
-  setStatus('Meters reset.', 'warn');
+  updateSkimmerCount(0, currentVantageState().mode === 'grid', 0, [], []);
+  refreshUI(createModeQualityCube());
+}
+
+function scheduleRefresh(delayMs = 150) {
+  if (!isRunning) return;
+  refreshRevision++;
+  const revision = refreshRevision;
+  hardResetVantageData();
+  setStatus('Refreshing vantage data...', 'warn');
+  if (refreshDebounceTimer) clearTimeout(refreshDebounceTimer);
+  refreshDebounceTimer = setTimeout(async () => {
+    refreshDebounceTimer = null;
+    await pollOnce(revision);
+  }, delayMs);
 }
 
 function setStatus(msg, cls = '') {
@@ -1033,16 +1878,105 @@ function setStatus(msg, cls = '') {
 }
 
 // ── Skimmer count display ─────────────────────────────────────────────────────
-function updateSkimmerCount(n, isGrid) {
-  const el = document.getElementById('skimmer-count');
+function formatTooltipList(title, calls) {
+  const fullList = Array.isArray(calls) ? calls : [];
+  if (fullList.length === 0) return `${title} (0)\nnone`;
+  const shown = fullList.slice(0, TOOLTIP_CALLSIGN_LIMIT);
+  const remaining = fullList.length - shown.length;
+  let out = `${title} (${fullList.length})\n${shown.join(', ')}`;
+  if (remaining > 0) out += `\n...and ${remaining} more`;
+  return out;
+}
+
+function updateSkimmerCount(n, isGrid, ftxReports = 0, skimmerCalls = [], ftxCalls = []) {
+  const skimmerLabel = document.getElementById('vantage-skimmer-label');
+  const ftxLabel = document.getElementById('vantage-ftx-label');
+  const combinedLabel = document.getElementById('skimmer-count');
+  if (!skimmerLabel && !combinedLabel) return;
+  const skimmerClass = n === 0
+    ? (isGrid ? 'skimmer-none' : 'skimmer-few')
+    : (n < 3 ? 'skimmer-few' : 'skimmer-ok');
+  const ftxClass = ftxReports === 0 ? 'skimmer-few' : 'skimmer-ok';
+
+  if (skimmerLabel) {
+    skimmerLabel.textContent = `${n} skimmer${n === 1 ? '' : 's'}`;
+    skimmerLabel.setAttribute('title', formatTooltipList('Skimmers', skimmerCalls));
+    skimmerLabel.className = `skimmer-count vantage-count-label ${skimmerClass}`;
+  }
+
+  if (ftxLabel) {
+    ftxLabel.textContent = `${ftxReports} FTx report${ftxReports === 1 ? '' : 's'}`;
+    ftxLabel.setAttribute('title', formatTooltipList('FTx calls', ftxCalls));
+    ftxLabel.className = `skimmer-count vantage-count-label ${ftxClass}`;
+  }
+
+  // Backward compatibility / accessibility mirror text.
+  if (combinedLabel) {
+    combinedLabel.textContent = `${n} skimmer${n === 1 ? '' : 's'} / ${ftxReports} FTx report${ftxReports === 1 ? '' : 's'}`;
+    if (!skimmerLabel) {
+      combinedLabel.className = `skimmer-count vantage-count-label ${skimmerClass}`;
+    }
+    combinedLabel.setAttribute(
+      'title',
+      `${formatTooltipList('Skimmers', skimmerCalls)}\n\n${formatTooltipList('FTx calls', ftxCalls)}`,
+    );
+  }
+}
+
+function currentVantageState() {
+  const mode = document.querySelector('input[name="vantage-mode"]:checked')?.value || 'region';
+  if (mode === 'grid') {
+    const grid = document.getElementById('grid-input').value.trim().toUpperCase();
+    const radiusSelect = document.getElementById('radius-select');
+    const radius = radiusSelect ? (RADIUS_VALUES[radiusSelect.selectedIndex] ?? 500) : 500;
+    const unit = getUnit();
+    const radiusMiles = getRadiusMiles();
+    return {
+      mode,
+      grid,
+      radius,
+      unit,
+      radiusMiles,
+      radiusLabel: `${radius} ${unit}`,
+      regionIdx: parseInt(document.getElementById('region-select').value, 10) || 0,
+    };
+  }
+  return {
+    mode,
+    regionIdx: parseInt(document.getElementById('region-select').value, 10) || 0,
+    grid: '',
+    radius: 0,
+    unit: getUnit(),
+    radiusMiles: getRadiusMiles(),
+    radiusLabel: '',
+  };
+}
+
+function vantagePointText() {
+  const v = currentVantageState();
+  if (v.mode === 'grid') {
+    const label = v.grid || '--';
+    return `${label} (${v.radius} ${v.unit})`;
+  }
+  return SOURCE_REGION_NAMES[v.regionIdx] || SOURCE_REGION_NAMES[0];
+}
+
+function updateVantageDisplay() {
+  const el = document.getElementById('vantage-point-text');
+  const canvas = document.getElementById('vantage-map-canvas');
   if (!el) return;
-  if (n === 0) {
-    // In grid mode with no hits, warn the user; in region mode just clear
-    el.textContent = isGrid ? 'no skimmers' : '';
-    el.className   = isGrid ? 'skimmer-count skimmer-none' : 'skimmer-count';
-  } else {
-    el.textContent = n === 1 ? '1 skimmer' : `${n} skimmers`;
-    el.className   = n < 3 ? 'skimmer-count skimmer-few' : 'skimmer-count skimmer-ok';
+  const v = currentVantageState();
+  el.textContent = vantagePointText();
+  if (canvas) {
+    const hasDetailed = Array.isArray(detailedWorldPolygons) && detailedWorldPolygons.length > 0;
+    canvas.classList.toggle('loading', !hasDetailed);
+    if (!hasDetailed && !detailedWorldLoadPromise && !detailedWorldLoadFailed) {
+      loadDetailedWorldPolygons().then(() => {
+        updateVantageDisplay();
+      }).catch(() => {});
+    }
+    if (v.mode === 'grid') drawGridVantageMap(canvas, v.grid, v.radiusMiles, v.radiusLabel);
+    else drawRegionVantageMap(canvas, v.regionIdx);
   }
 }
 
@@ -1061,7 +1995,7 @@ function startAutoUpdate() {
       if (newGrid.slice(0, 4) !== current) {
         document.getElementById('grid-input').value = newGrid;
         saveSettings();
-        if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
+        if (isRunning) scheduleRefresh(120);
       }
     },
     err => {
@@ -1097,6 +2031,7 @@ function updateRadiusLabels() {
   RADIUS_VALUES.forEach((v, i) => { if (sel.options[i]) sel.options[i].text = `${v} ${u}`; });
   const btn = document.getElementById('unit-toggle');
   if (btn) { btn.textContent = u; btn.dataset.auto = (unitPref === 'auto') ? '1' : '0'; }
+  updateVantageDisplay();
 }
 
 function getRadiusMiles() {
@@ -1113,11 +2048,14 @@ function saveSettings() {
     grid:         document.getElementById('grid-input').value.trim().toUpperCase(),
     radiusIndex:  document.getElementById('radius-select').selectedIndex,
     unit:         unitPref,
+    theme:        currentTheme,
     autoUpdate:   document.getElementById('autoupdate-cb')?.checked || false,
+    desktopCollapsed: collapsedDesktopIndexes(),
   });
 }
 
 function applySettings(s) {
+  desktopCollapsed = normaliseDesktopCollapsed(s.desktopCollapsed);
   document.querySelector(`input[name="vantage-mode"][value="${s.mode}"]`).checked = true;
   document.getElementById('region-select').value = s.regionIndex;
   document.getElementById('grid-input').value    = s.grid || '';
@@ -1125,8 +2063,11 @@ function applySettings(s) {
   unitPref = s.unit ?? 'auto';
   if (document.getElementById('autoupdate-cb'))
     document.getElementById('autoupdate-cb').checked = s.autoUpdate || false;
+  applyTheme(s.theme || 'dark');
   updateRadiusLabels();
   updateModeUI(s.mode);
+  applyDesktopCollapseState();
+  updateVantageDisplay();
 }
 
 function updateModeUI(mode) {
@@ -1136,9 +2077,7 @@ function updateModeUI(mode) {
   document.getElementById('radius-select').disabled  = !isGrid;
   document.getElementById('unit-toggle').disabled    = !isGrid;
 
-  // Skimmer count — always visible, dimmed when not in grid mode
-  const sc = document.getElementById('skimmer-count');
-  if (sc) sc.classList.remove('skimmer-disabled');
+  // Skimmer count always visible in vantage panel.
 
   // Auto-update — visible always; only enabled on mobile AND in grid mode
   const al = document.getElementById('autoupdate-label');
@@ -1152,6 +2091,7 @@ function updateModeUI(mode) {
   if (rl) rl.classList.toggle('ctrl-label-disabled', !isGrid);
 
   if (!isGrid) stopAutoUpdate();
+  updateVantageDisplay();
 }
 
 // ── Geo auto-detect ───────────────────────────────────────────────────────────
@@ -1165,8 +2105,9 @@ function applyLocation(lat, lon) {
   }
   if (grid && !document.getElementById('grid-input').value) {
     document.getElementById('grid-input').value = grid;
-    setStatus(`Location detected: ${grid} — press Start to begin.`, 'ok');
+    setStatus(`Location detected: ${grid}.`, 'ok');
     saveSettings();
+    scheduleRefresh(100);
   }
 }
 
@@ -1196,6 +2137,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const s = Settings.load();
   applySettings(s);
 
+  const themeDarkBtn = document.getElementById('theme-dark');
+  const themeLightBtn = document.getElementById('theme-light');
+  const themeCbBtn = document.getElementById('theme-cb');
+  if (themeDarkBtn) themeDarkBtn.addEventListener('click', () => { applyTheme('dark'); saveSettings(); });
+  if (themeLightBtn) themeLightBtn.addEventListener('click', () => { applyTheme('light'); saveSettings(); });
+  if (themeCbBtn) themeCbBtn.addEventListener('click', () => { applyTheme('cb'); saveSettings(); });
+
   if (!s.grid) autoDetect(); else autoDetect();
 
   // Restore auto-update if it was enabled
@@ -1205,31 +2153,38 @@ document.addEventListener('DOMContentLoaded', () => {
     rb.addEventListener('change', () => {
       updateModeUI(rb.value);
       saveSettings();
-      if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
+      scheduleRefresh();
     });
   });
 
   document.getElementById('region-select').addEventListener('change', () => {
     if (unitPref === 'auto') updateRadiusLabels();
+    updateVantageDisplay();
     saveSettings();
-    if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
+    scheduleRefresh();
   });
 
   document.getElementById('radius-select').addEventListener('change', () => {
+    updateVantageDisplay();
     saveSettings();
-    if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
+    scheduleRefresh();
   });
 
   document.getElementById('unit-toggle').addEventListener('click', () => {
     const current = getUnit();
     unitPref = current === 'mi' ? 'km' : 'mi';
     updateRadiusLabels();
+    updateVantageDisplay();
     saveSettings();
-    if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
+    scheduleRefresh();
   });
 
   const gi = document.getElementById('grid-input');
-  gi.addEventListener('input', () => { gi.style.borderColor = ''; saveSettings(); });
+  gi.addEventListener('input', () => {
+    gi.style.borderColor = '';
+    updateVantageDisplay();
+    saveSettings();
+  });
   gi.addEventListener('blur', () => {
     const g = gi.value.trim();
     if (g && !isValidGrid(g)) {
@@ -1237,7 +2192,7 @@ document.addEventListener('DOMContentLoaded', () => {
       setStatus(`'${g}' is not a valid Maidenhead grid square (e.g. FN42).`, 'error');
     } else {
       gi.style.borderColor = '';
-      if (isRunning) { stopPolling(); resetMeters(); startPolling(); }
+      scheduleRefresh();
     }
   });
 
@@ -1250,15 +2205,21 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  document.getElementById('btn-start').addEventListener('click', startPolling);
-  document.getElementById('btn-stop').addEventListener('click', stopPolling);
-  document.getElementById('btn-reset').addEventListener('click', resetMeters);
+  // Keep vantage graphics crisp whenever viewport dimensions change.
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => updateVantageDisplay(), 80);
+  });
+  requestAnimationFrame(updateVantageDisplay);
 
   // Space weather + UTC clock
   updateUTC();
   setInterval(updateUTC, 1000);
   fetchSolar();
   setInterval(fetchSolar, 5 * 60 * 1000);
+
+  startPolling();
 });
 
 // ── Space weather + UTC ───────────────────────────────────────────────────────
