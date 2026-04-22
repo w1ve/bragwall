@@ -1284,7 +1284,7 @@ async function fetchSolarDataForAudio() {
   } catch { return {}; }
 }
 
-function buildAudioReportText(params, bandResults, solar = {}) {
+function buildAudioReportText(params, bandResults, solar = {}, sourceStats = {}) {
   const greeting = greetingForTimeOfDay(params.timeOfDay);
   const utcSpoken = pronounceUtc(params.utc);
 
@@ -1380,7 +1380,11 @@ function buildAudioReportText(params, bandResults, solar = {}) {
   }
 
   lines.push('Go to H F Signals dot live for the latest data.');
+  const skimmers = sourceStats.skimmers || 0;
+  const ftxCount = sourceStats.ftxCount || 0;
+  lines.push(`Please note this is point-in-time data, and may differ from the H F Signals dot live view. ${skimmers} skimmers and ${ftxCount} F T x reports were used to create this report.`);
   lines.push('We depend on free data sources for this site. Thanks to N O A A, the Reverse Beacon Network, and PSKReporter for their free real-time data.');
+  lines.push('This is a hobby site created by Gerry, W 1 V E. Enjoy!');
 
   return lines.join(' ');
 }
@@ -1580,6 +1584,31 @@ async function collectBandResultsPerRegion(params) {
   return results;
 }
 
+// Count unique RBN skimmers and total FTx reports used across all source spots
+function countSourceStats(params) {
+  const skimmers = new Set();
+  let ftxCount = 0;
+
+  // RBN skimmers: unique spotter callsigns that contributed to the data
+  for (const [, spot] of spotMap) {
+    for (const spotter of Object.keys(spot.lsn || {})) {
+      skimmers.add(spotter);
+    }
+  }
+
+  // FTx reports: count entries in pskCacheData for the relevant regions/bands
+  if (pskCacheData) {
+    for (const toRegion of params.toRegions) {
+      for (const band of params.bands) {
+        const entry = pskCacheData?.[params.fromRegion]?.[toRegion]?.[band];
+        if (entry && Number.isFinite(entry.snr)) ftxCount += entry.count || 1;
+      }
+    }
+  }
+
+  return { skimmers: skimmers.size, ftxCount };
+}
+
 
 // ── Waiting audio (plays immediately while TTS is generating) ─────────────────
 let waitingAudioGenerating = false;
@@ -1699,7 +1728,8 @@ async function serveAudioPropReport(req, res, query = {}) {
   }
   const regionResults = await collectBandResultsPerRegion(params);
   const solar = await fetchSolarDataForAudio();
-  const englishText = buildAudioReportText(params, regionResults, solar);
+  const sourceStats = countSourceStats(params);
+  const englishText = buildAudioReportText(params, regionResults, solar, sourceStats);
   const translatedText = await translateTextIfNeeded(englishText, params.lang);
   const transcript = translatedText && translatedText.trim() ? translatedText : englishText;
 
