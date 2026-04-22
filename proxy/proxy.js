@@ -919,6 +919,10 @@ async function parseAudioQuery(query = {}, headers = {}, clientIp = null) {
   const ssb = parseBoolean(query.ssb || query.includeSsb || query.ssbChecked);
   // solar=0 suppresses the solar/geomagnetic block (useful for automated/API calls)
   const includeSolar = query.solar !== undefined ? parseBoolean(query.solar) : true;
+  // Mode flags (kept for cache key stability; mode reporting now derives from data)
+  const cwChecked   = query.cw   !== undefined ? parseBoolean(query.cw)   : true;
+  const rttyChecked = query.rtty !== undefined ? parseBoolean(query.rtty) : true;
+  const ftxChecked  = query.ftx  !== undefined ? parseBoolean(query.ftx)  : true;
   return {
     mode,
     fromRegion,
