@@ -67,9 +67,21 @@ const SEG_COLORS = {
   peak: ['#005a22','#005a22','#005a22','#005a22','#005a22','#005a22','#005a22','#005a22','#005a22',
          '#645500','#645500','#645500','#723c00','#641212','#641212'],
 };
+const DEFAULT_MODE_QUALITY_COLORS = ['#00d250', '#e6c800', '#ff8c00', '#dc1e1e'];
+const SUPPORTED_THEMES = new Set(['dark', 'light', 'cb']);
+const THEME_META_COLORS = { dark: '#0d0d1a', light: '#f4f7fb', cb: '#0f1222' };
+const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+let currentTheme = 'dark';
+let meterPalette = {
+  live: SEG_COLORS.live.slice(),
+  peak: SEG_COLORS.peak.slice(),
+  quality: DEFAULT_MODE_QUALITY_COLORS.slice(),
+  dimmed: '#1c1c32',
+};
 
 let pskByRegion = {};
 let pskMeta = { age: null, cached: false, stale: false };
+let latestModeQualityByBand = createModeQualityCube();
 
 const VANTAGE_GRID_COLOR = '#ffffff';
 const SOURCE_REGION_NAMES = [
@@ -250,6 +262,51 @@ const Settings = {
     try { localStorage.setItem(this.KEY, JSON.stringify(obj)); } catch {}
   },
 };
+
+function readThemeColorVar(varName, fallback) {
+  if (!document.body) return fallback;
+  const v = getComputedStyle(document.body).getPropertyValue(varName).trim();
+  return v || fallback;
+}
+
+function buildThemeMeterPalette() {
+  const green = readThemeColorVar('--green', '#00d250');
+  const yellow = readThemeColorVar('--yellow', '#e6c800');
+  const orange = readThemeColorVar('--orange', '#ff8c00');
+  const red = readThemeColorVar('--red', '#dc1e1e');
+  const pkGreen = readThemeColorVar('--pk-green', '#005a22');
+  const pkYellow = readThemeColorVar('--pk-yellow', '#645500');
+  const pkOrange = readThemeColorVar('--pk-orange', '#723c00');
+  const pkRed = readThemeColorVar('--pk-red', '#641212');
+  const dimmed = readThemeColorVar('--dimmed', '#1c1c32');
+  return {
+    live: [green, green, green, green, green, green, green, green, green, yellow, yellow, yellow, orange, red, red],
+    peak: [pkGreen, pkGreen, pkGreen, pkGreen, pkGreen, pkGreen, pkGreen, pkGreen, pkGreen, pkYellow, pkYellow, pkYellow, pkOrange, pkRed, pkRed],
+    quality: [green, yellow, orange, red],
+    dimmed,
+  };
+}
+
+function applyMeterPalette() {
+  meterPalette = buildThemeMeterPalette();
+  if (Array.isArray(meters) && meters.length) refreshUI(latestModeQualityByBand);
+}
+
+function applyTheme(themeName) {
+  const nextTheme = SUPPORTED_THEMES.has(themeName) ? themeName : 'dark';
+  if (!document.body) return;
+  document.body.classList.remove('theme-dark', 'theme-light', 'theme-cb');
+  document.body.classList.add(`theme-${nextTheme}`);
+  const darkBtn = document.getElementById('theme-dark');
+  const lightBtn = document.getElementById('theme-light');
+  const cbBtn = document.getElementById('theme-cb');
+  if (darkBtn) darkBtn.classList.toggle('active', nextTheme === 'dark');
+  if (lightBtn) lightBtn.classList.toggle('active', nextTheme === 'light');
+  if (cbBtn) cbBtn.classList.toggle('active', nextTheme === 'cb');
+  if (themeColorMeta) themeColorMeta.setAttribute('content', THEME_META_COLORS[nextTheme] || THEME_META_COLORS.dark);
+  currentTheme = nextTheme;
+  applyMeterPalette();
+}
 
 // ── Maidenhead grid → lat/lon ─────────────────────────────────────────────────
 function gridToLatLon(grid) {
@@ -712,10 +769,11 @@ function median(nums) {
 function qualityColorForSnr(snr) {
   if (snr == null) return null;
   const frac = Math.max(0, Math.min(snr / MAX_SNR, 1));
-  if (frac < 0.60) return '#00d250';
-  if (frac < 0.80) return '#e6c800';
-  if (frac < 0.90) return '#ff8c00';
-  return '#dc1e1e';
+  const q = meterPalette.quality || DEFAULT_MODE_QUALITY_COLORS;
+  if (frac < 0.60) return q[0] || DEFAULT_MODE_QUALITY_COLORS[0];
+  if (frac < 0.80) return q[1] || DEFAULT_MODE_QUALITY_COLORS[1];
+  if (frac < 0.90) return q[2] || DEFAULT_MODE_QUALITY_COLORS[2];
+  return q[3] || DEFAULT_MODE_QUALITY_COLORS[3];
 }
 
 function qualityFractionForMode(modeKey, snr) {
@@ -1080,14 +1138,21 @@ function drawBar(canvas, hasData, snr, peak) {
   const peakN  = Math.min(peak / MAX_SNR, 1);
   const litSeg = Math.round(liveN * SEG_COUNT);
   const pkSeg  = Math.round(peakN * SEG_COUNT);
+  const dimmedColor = meterPalette.dimmed || '#1c1c32';
+  const liveColors = Array.isArray(meterPalette.live) && meterPalette.live.length === SEG_COUNT
+    ? meterPalette.live
+    : SEG_COLORS.live;
+  const peakColors = Array.isArray(meterPalette.peak) && meterPalette.peak.length === SEG_COUNT
+    ? meterPalette.peak
+    : SEG_COLORS.peak;
   for (let i = 0; i < SEG_COUNT; i++) {
     const x    = i * (segW + gapW);
     const lit  = i < litSeg;
     const inPk = !lit && i < pkSeg;
-    if (!hasData)   ctx.fillStyle = '#1c1c32';
-    else if (lit)   ctx.fillStyle = SEG_COLORS.live[i];
-    else if (inPk)  ctx.fillStyle = SEG_COLORS.peak[i];
-    else            ctx.fillStyle = '#1c1c32';
+    if (!hasData)   ctx.fillStyle = dimmedColor;
+    else if (lit)   ctx.fillStyle = liveColors[i];
+    else if (inPk)  ctx.fillStyle = peakColors[i];
+    else            ctx.fillStyle = dimmedColor;
     ctx.fillRect(x, 0, segW, h);
   }
 }
@@ -1102,11 +1167,13 @@ const DISPLAY_MODES = [
   { abbr: 'FTx', sources: ['FT8','FT4'], isSSB: false },
 ];
 const MODE_QUALITY_KEY = { CW: 'CW', RY: 'RTTY', FTx: 'FTx', SSB: 'SSB' };
-const MODE_QUALITY_COLORS = ['#00d250', '#e6c800', '#ff8c00', '#dc1e1e'];
 
 function buildQualityTrack(frac, enabled) {
   const track = document.createElement('span');
   track.className = 'mode-quality-track';
+  const qualityColors = Array.isArray(meterPalette.quality) && meterPalette.quality.length === 4
+    ? meterPalette.quality
+    : DEFAULT_MODE_QUALITY_COLORS;
   for (let i = 0; i < 4; i++) {
     const seg = document.createElement('span');
     seg.className = 'mode-quality-seg';
@@ -1120,7 +1187,7 @@ function buildQualityTrack(frac, enabled) {
       else if (frac > start) fill = (frac - start) / 0.25;
     }
     const fillPct = Math.round(fill * 100);
-    const c = MODE_QUALITY_COLORS[i];
+    const c = qualityColors[i] || DEFAULT_MODE_QUALITY_COLORS[i];
     fillEl.style.width = `${fillPct}%`;
     fillEl.style.backgroundColor = c;
     seg.appendChild(fillEl);
@@ -1471,6 +1538,8 @@ function buildPanels() {
 
 // ── Refresh both layouts ──────────────────────────────────────────────────────
 function refreshUI(modeQualityByBand = null) {
+  if (modeQualityByBand) latestModeQualityByBand = modeQualityByBand;
+  else modeQualityByBand = latestModeQualityByBand;
   meters.forEach((m, ri) => {
     BANDS.forEach((_, bi) => {
       const hasData = m.hasValue[bi];
@@ -1979,6 +2048,7 @@ function saveSettings() {
     grid:         document.getElementById('grid-input').value.trim().toUpperCase(),
     radiusIndex:  document.getElementById('radius-select').selectedIndex,
     unit:         unitPref,
+    theme:        currentTheme,
     autoUpdate:   document.getElementById('autoupdate-cb')?.checked || false,
     desktopCollapsed: collapsedDesktopIndexes(),
   });
@@ -1993,6 +2063,7 @@ function applySettings(s) {
   unitPref = s.unit ?? 'auto';
   if (document.getElementById('autoupdate-cb'))
     document.getElementById('autoupdate-cb').checked = s.autoUpdate || false;
+  applyTheme(s.theme || 'dark');
   updateRadiusLabels();
   updateModeUI(s.mode);
   applyDesktopCollapseState();
@@ -2065,6 +2136,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const s = Settings.load();
   applySettings(s);
+
+  const themeDarkBtn = document.getElementById('theme-dark');
+  const themeLightBtn = document.getElementById('theme-light');
+  const themeCbBtn = document.getElementById('theme-cb');
+  if (themeDarkBtn) themeDarkBtn.addEventListener('click', () => { applyTheme('dark'); saveSettings(); });
+  if (themeLightBtn) themeLightBtn.addEventListener('click', () => { applyTheme('light'); saveSettings(); });
+  if (themeCbBtn) themeCbBtn.addEventListener('click', () => { applyTheme('cb'); saveSettings(); });
 
   if (!s.grid) autoDetect(); else autoDetect();
 

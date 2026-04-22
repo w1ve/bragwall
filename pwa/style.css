@@ -59,15 +59,15 @@ body.theme-cb {
   --text:      #e8f3ff;
   --text-dim:  #9fb0c9;
   --text-hdr:  #4fd7ff;
-  --green:     #2aa8ff;
-  --yellow:    #f3cf3c;
-  --orange:    #f08f3a;
-  --red:       #d24c86;
-  --pk-green:  #176ca6;
-  --pk-yellow: #8a7420;
-  --pk-orange: #8e5220;
-  --pk-red:    #7a2f50;
-  --dimmed:    #232a4f;
+  --green:     #39b8ff;
+  --yellow:    #f6d84a;
+  --orange:    #ff9f1a;
+  --red:       #d94fb2;
+  --pk-green:  #1f6b95;
+  --pk-yellow: #7f6b20;
+  --pk-orange: #7e4c10;
+  --pk-red:    #6a2a5f;
+  --dimmed:    #1f2750;
   --border:    #4fd7ff;
   --no-data:   #6f7f99;
 }
@@ -326,7 +326,7 @@ h1 {
   max-width: calc(100% - 2px);
   height: 3px;
   border-radius: 0;
-  background: #1c1c32;
+  background: var(--dimmed);
   opacity: 1;
   position: absolute;
   left: 1px;
@@ -340,7 +340,7 @@ h1 {
   height: 100%;
   width: 24%;
   margin-right: 1%;
-  background: #1c1c32;
+  background: var(--dimmed);
 }
 
 .mode-quality-fill {
@@ -367,6 +367,19 @@ h1 {
   background: #7a5500 !important;
   border: 1px solid #ffd000;
   box-shadow: 0 0 3px rgba(255,208,0,0.4);
+}
+
+/* Color-blind theme: avoid red/green dependence in mode badges. */
+body.theme-cb .mode-active {
+  background: #11578d !important;
+  border-color: #67c8ff;
+  box-shadow: 0 0 3px rgba(103,200,255,0.45);
+}
+
+body.theme-cb .mode-ssb {
+  background: #7c5a0b !important;
+  border-color: #ffd44f;
+  box-shadow: 0 0 3px rgba(255,212,79,0.45);
 }
 
 /* Inactive — clearly readable, muted red */
