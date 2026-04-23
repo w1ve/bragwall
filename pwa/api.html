@@ -742,8 +742,11 @@
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute('content', META_COLORS[t] || META_COLORS.dark);
     try { localStorage.setItem('hfsig-theme', t); } catch {}
-    // Reload live badge images with new theme param
+    // Reload live badge images with new theme param (skip fixed live-example imgs)
+    const fixedIds = new Set(['ex-region-dark','ex-region-light','ex-region-cb',
+                               'ex-grid-dark','ex-grid-light','ex-grid-cb']);
     document.querySelectorAll('img[src*="/badge/"]').forEach(img => {
+      if (fixedIds.has(img.id)) return; // live examples always show all 3 themes
       const url = new URL(img.src, location.href);
       url.searchParams.set('theme', t);
       url.searchParams.set('_t', Date.now()); // bust cache
