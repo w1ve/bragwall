@@ -432,6 +432,12 @@ const gridPlaceCache = new Map();     // grid4 → { name, expiresAt }
 const GRID_PLACE_CACHE_MS = 24 * 60 * 60 * 1000; // 24 h
 let asyncVoiceIdCache = ASYNC_VOICE_ID || null;
 let asyncVoiceLookupPromise = null;
+
+// Per-cache-key in-flight generation promises.
+// If two requests arrive simultaneously for the same key, the second one
+// waits for the first generation to finish then serves from cache — rather
+// than both generating concurrently and fighting over the output file.
+const audioGenerationInFlight = new Map();
 let audioCacheDirReady = false;
 
 function pruneSpots() {
@@ -2035,6 +2041,27 @@ async function serveAudioPropReport(req, res, query = {}) {
       return;
     }
   } catch {}
+
+  // ── In-flight deduplication ───────────────────────────────────────────────
+  // If another request is already generating the same cache key, wait for it
+  // to finish and then serve from cache. This prevents concurrent writes to
+  // the same output file (which caused mid-stream language corruption when
+  // multiple users hit simultaneously).
+  if (audioGenerationInFlight.has(outPath)) {
+    console.log('[audio] waiting for in-flight generation:', fileName);
+    try { await audioGenerationInFlight.get(outPath); } catch {}
+    // Re-check cache — the in-flight request should have populated it
+    try {
+      const st = await fs.promises.stat(outPath);
+      if ((Date.now() - st.mtimeMs) < AUDIO_CACHE_MS) {
+        console.log('[audio] serving after in-flight wait:', fileName);
+        sendAudioFile(res, outPath, false, params.lang);
+        return;
+      }
+    } catch {}
+    // If still not there (generation failed), fall through to generate ourselves
+  }
+
   // ── Cache miss: stream directly to client while saving to file ────────────
 
   await ensurePskForAudio();
@@ -2048,6 +2075,11 @@ async function serveAudioPropReport(req, res, query = {}) {
   const englishText   = buildAudioReportText(params, regionResults, solar, sourceStats);
   const translatedText = await translateTextIfNeeded(englishText, params.lang);
   const transcript    = translatedText && translatedText.trim() ? translatedText : englishText;
+
+  // Register this generation so concurrent requests for the same key wait
+  let resolveInFlight, rejectInFlight;
+  const inFlightPromise = new Promise((res, rej) => { resolveInFlight = res; rejectInFlight = rej; });
+  audioGenerationInFlight.set(outPath, inFlightPromise);
 
   try {
     await deleteMatchingAudio(prefix);
@@ -2102,13 +2134,17 @@ async function serveAudioPropReport(req, res, query = {}) {
     }
 
     if (!res.writableEnded) res.end();
+    resolveInFlight();
   } catch (e) {
+    rejectInFlight(e);
     console.error('[audio] generation failed:', e?.message || e);
     if (!res.headersSent) {
       sendJson(res, 502, { error: 'audio_generation_failed', reason: String(e?.message || e || 'unknown') });
     } else if (!res.writableEnded) {
       res.end();
     }
+  } finally {
+    audioGenerationInFlight.delete(outPath);
   }
 }
 
