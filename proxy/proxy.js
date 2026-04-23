@@ -2132,6 +2132,7 @@ async function serveAudioPropReport(req, res, query = {}) {
   const englishText   = buildAudioReportText(params, regionResults, solar, sourceStats);
   const translatedText = await translateTextIfNeeded(englishText, params.lang);
   const transcript    = translatedText && translatedText.trim() ? translatedText : englishText;
+  const requestedLang = outputLanguage(params.lang);
 
   // Register this generation so concurrent requests for the same key wait
   let resolveInFlight, rejectInFlight;
@@ -2143,6 +2144,40 @@ async function serveAudioPropReport(req, res, query = {}) {
 
   try {
     await deleteMatchingAudio(prefix);
+    const dynamicPath = `${outPath}.dynamic-tmp`;
+
+    // Non-English requests are generated in buffered mode (no live client tee).
+    // This avoids partial-stream playback errors when upstream TTS rejects or
+    // truncates translated script output mid-response.
+    const bufferedMode = requestedLang !== 'en';
+    let usedEnglishTtsFallback = false;
+    let responseLang = requestedLang;
+
+    if (bufferedMode) {
+      console.log('[audio] cache miss — buffered TTS generation:', fileName);
+      try {
+        await streamAsyncTtsToFile(transcript, params.lang, dynamicPath);
+      } catch (ttsErr) {
+        const canFallbackToEnglish = transcript !== englishText && requestedLang !== 'en';
+        if (!canFallbackToEnglish) throw ttsErr;
+        console.warn('[audio] translated-script TTS failed; retrying English fallback:', ttsErr?.message || ttsErr);
+        await streamAsyncTtsToFile(englishText, 'en', dynamicPath);
+        usedEnglishTtsFallback = true;
+        responseLang = 'en';
+      }
+
+      if (responseLang === 'en') {
+        await ensureOutroAudio();
+        await concatMp3Files(dynamicPath, OUTRO_AUDIO_PATH, outPath);
+        fs.promises.unlink(dynamicPath).catch(() => {});
+      } else {
+        await fs.promises.rename(dynamicPath, outPath);
+      }
+
+      resolveInFlight();
+      sendAudioFile(res, outPath, true, responseLang);
+      return;
+    }
 
     // Start streaming headers before we begin TTS — client can start buffering immediately
     res.writeHead(200, {
@@ -2152,31 +2187,26 @@ async function serveAudioPropReport(req, res, query = {}) {
       'Cache-Control': 'no-store',
       'X-HFSIGNALS-Audio': 'streaming',
       'X-HFSIGNALS-Filename': fileName,
-      'X-HFSIGNALS-Language': outputLanguage(params.lang),
-      'X-HFSIGNALS-Tooltip': audioTooltipText(params.lang),
+      'X-HFSIGNALS-Language': responseLang,
+      'X-HFSIGNALS-Tooltip': audioTooltipText(responseLang),
       'Access-Control-Expose-Headers': 'X-HFSIGNALS-Audio, X-HFSIGNALS-Filename, X-HFSIGNALS-Language, X-HFSIGNALS-Tooltip',
     });
 
     console.log('[audio] cache miss — streaming live TTS:', fileName);
-    const dynamicPath = `${outPath}.dynamic-tmp`;
 
-    // Stream TTS to client and file simultaneously.
-    // Some translated scripts can be rejected by upstream TTS even when
-    // translation succeeded; in that case, retry once in English so the API
-    // returns audio instead of failing the request.
-    let usedEnglishTtsFallback = false;
     try {
       await streamAsyncTtsToFile(transcript, params.lang, dynamicPath, res);
     } catch (ttsErr) {
-      const canFallbackToEnglish = transcript !== englishText && outputLanguage(params.lang) !== 'en';
+      const canFallbackToEnglish = transcript !== englishText && requestedLang !== 'en';
       if (!canFallbackToEnglish) throw ttsErr;
       console.warn('[audio] translated-script TTS failed; retrying English fallback:', ttsErr?.message || ttsErr);
       await streamAsyncTtsToFile(englishText, 'en', dynamicPath, res);
       usedEnglishTtsFallback = true;
+      responseLang = 'en';
     }
 
     // Stitch static outro (English only) — do this after client has received all dynamic audio
-    if (params.lang === 'en' || !params.lang || usedEnglishTtsFallback) {
+    if (responseLang === 'en' || !params.lang || usedEnglishTtsFallback) {
       try {
         await ensureOutroAudio();
         // Stream the outro file to client, then save final stitched file to cache
