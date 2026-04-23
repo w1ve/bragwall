@@ -168,18 +168,20 @@ const HIST_WINDOW_S   = 24 * 60 * 60;
 //   footer (skimmer count): 20px
 //   branding bar: 22px
 //   total: 330px
-const RM_W    = 168;
-const RM_HDR  = 46;
-const RM_ROW  = 26;
-const RM_FTR  = 20;
-const RM_BRD  = 22;
-const RM_PAD  = 5;
-const RM_H    = RM_HDR + BANDS.length * RM_ROW + RM_FTR + RM_BRD;
+const RM_W      = 168;
+const RM_HDR    = 46;
+const RM_SIG_H  = 18;  // signal bar sub-row
+const RM_MODE_H = 13;  // mode strip sub-row
+const RM_ROW    = RM_SIG_H + RM_MODE_H + 1; // 1px separator = 32px
+const RM_FTR    = 20;
+const RM_BRD    = 22;
+const RM_PAD    = 5;
+const RM_H      = RM_HDR + BANDS.length * RM_ROW + RM_FTR + RM_BRD;
 
-// Bar area within a row (matches .bar-wrap height: 14px)
-const RM_BAR_H  = 14;
-const RM_LABEL_W = 34; // .band-label width
-const RM_SUNIT_W = 36; // .s-unit width
+// Bar area within signal sub-row
+const RM_BAR_H   = 10;
+const RM_LABEL_W = 34; // band-label width
+const RM_SUNIT_W = 28; // s-unit width (tightened to give bar more room)
 const RM_SEG     = 15; // segments in bar
 
 // ── History map sizes ─────────────────────────────────────────────────────────
@@ -611,31 +613,57 @@ function segColor(i, t) {
 }
 
 // ── Draw one band row ─────────────────────────────────────────────────────────
-// y = top of this row within the canvas
+// ── Display mode slots — matches main UI DISPLAY_MODES ───────────────────────
+const DISPLAY_MODE_SLOTS = [
+  { label: 'CW',  test: m => m.has('CW'),   qKey: 'CW'   },
+  { label: 'SSB', test: m => m.has('SSB'),  qKey: 'SSB'  },
+  { label: 'RY',  test: m => m.has('RTTY'), qKey: 'RTTY' },
+  { label: 'DIG', test: m => m.has('FT8'),  qKey: 'FTx'  },
+];
+
+// Draw a mini 3-segment S-meter strip inside a mode chip (same concept as main UI)
+function drawMiniSmeter(ctx, x, y, w, h, snrVal, t) {
+  const MINI_SEGS = 3;
+  const gap = 1;
+  const segW = Math.floor((w - gap * (MINI_SEGS - 1)) / MINI_SEGS);
+  if (segW < 1) return;
+  const frac = snrVal != null ? Math.min(Math.max(snrVal / MAX_SNR, 0), 1) : 0;
+  const lit  = Math.round(frac * MINI_SEGS);
+  for (let i = 0; i < MINI_SEGS; i++) {
+    const sx = x + i * (segW + gap);
+    // Active segments use segColor scaled to position; inactive are darker
+    ctx.fillStyle = i < lit ? segColor(Math.floor(i * RM_SEG / MINI_SEGS), t)
+                             : 'rgba(0,0,0,0.30)';
+    ctx.fillRect(sx, y, segW, h);
+  }
+}
+
+// y = top of this band row (spans RM_ROW pixels = RM_SIG_H + 1 + RM_MODE_H)
 function drawBandRow(ctx, y, bandLabel, result, t) {
   const { snr, hasData, modes, modeQuality } = result;
-  const rowX = 0;
-  const W    = RM_W;
+  const W      = RM_W;
+  const modeSet = (modes instanceof Set) ? modes : new Set();
+
+  // ── Sub-row 1: Signal bar (RM_SIG_H px) ──────────────────────────────────
+  const sigY  = y;
+  const barX  = RM_PAD + RM_LABEL_W;
+  const barW  = W - RM_PAD * 2 - RM_LABEL_W - RM_SUNIT_W;
+  const barY  = sigY + Math.floor((RM_SIG_H - RM_BAR_H) / 2);
 
   // Band label — left, accent, bold 11px
   ctx.fillStyle    = t.accent;
   ctx.font         = 'bold 11px "DejaVu Sans Mono"';
   ctx.textAlign    = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText(bandLabel, rowX + RM_PAD, y + RM_ROW / 2);
+  ctx.fillText(bandLabel, RM_PAD, sigY + RM_SIG_H / 2);
 
-  // S-unit — right column
+  // S-unit — right
   const sStr = hasData ? snrToSUnit(snr) : '--';
   ctx.fillStyle    = hasData ? t.green : t.noData;
   ctx.font         = 'bold 9px "DejaVu Sans Mono"';
   ctx.textAlign    = 'right';
   ctx.textBaseline = 'middle';
-  ctx.fillText(sStr, W - RM_PAD, y + RM_ROW / 2);
-
-  // Bar — between label and s-unit
-  const barX = RM_PAD + RM_LABEL_W;
-  const barW = W - RM_PAD * 2 - RM_LABEL_W - RM_SUNIT_W;
-  const barY = y + (RM_ROW - RM_BAR_H) / 2;
+  ctx.fillText(sStr, W - RM_PAD, sigY + RM_SIG_H / 2);
 
   // Bar background
   ctx.fillStyle = t.dimSeg;
@@ -645,7 +673,6 @@ function drawBandRow(ctx, y, bandLabel, result, t) {
   ctx.strokeRect(barX - 0.5, barY - 0.5, barW + 1, RM_BAR_H + 1);
 
   if (hasData) {
-    // Segment fill
     const gap  = 1;
     const segW = (barW - gap * (RM_SEG - 1)) / RM_SEG;
     const lit  = Math.round(Math.min(snr / MAX_SNR, 1) * RM_SEG);
@@ -654,41 +681,62 @@ function drawBandRow(ctx, y, bandLabel, result, t) {
       ctx.fillStyle = i < lit ? segColor(i, t) : t.dimSeg;
       ctx.fillRect(sx, barY, segW, RM_BAR_H);
     }
+  }
 
-    // Mode pills — rendered inside the bar, right-aligned
-    // Each pill: 2-char label (CW, FT, RT) in a small rounded rect
-    // Same display slots as main UI: CW / SSB / RY / DIG
-    const PILL_SLOTS = [
-      { key: 'CW',   label: 'CW',  test: m => m.has('CW')   },
-      { key: 'SSB',  label: 'SSB', test: m => m.has('SSB')  },
-      { key: 'RTTY', label: 'RY',  test: m => m.has('RTTY') },
-      { key: 'FTx',  label: 'DIG', test: m => m.has('FT8')  },
-    ];
-    const pillH  = RM_BAR_H - 2;
-    const pillW  = 14;
-    const pillGap = 2;
-    const modeSet = (modes instanceof Set) ? modes : new Set();
-    const activeModes = PILL_SLOTS.filter(p => p.test(modeSet));
-    if (activeModes.length > 0) {
-      let px = barX + barW - 1;  // start from right edge of bar
-      for (let pi = activeModes.length - 1; pi >= 0; pi--) {
-        px -= pillW;
-        const pill = activeModes[pi];
-        // Pill background — semi-transparent accent
-        ctx.fillStyle = `rgba(${hexToRgb(t.accent)},0.25)`;
-        ctx.fillRect(px, barY + 1, pillW, pillH);
-        // Pill border
-        ctx.strokeStyle = `rgba(${hexToRgb(t.accent)},0.70)`;
-        ctx.lineWidth = 0.75;
-        ctx.strokeRect(px + 0.5, barY + 1.5, pillW - 1, pillH - 1);
-        // Pill text
-        ctx.fillStyle    = t.accent;
-        ctx.font         = `bold 7px "DejaVu Sans Mono"`;
-        ctx.textAlign    = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(pill.label, px + pillW / 2, barY + RM_BAR_H / 2);
-        px -= pillGap;
-      }
+  // ── 1px separator between sub-rows ───────────────────────────────────────
+  const sepY = y + RM_SIG_H;
+  ctx.strokeStyle = `rgba(${hexToRgb(t.border)},0.10)`;
+  ctx.lineWidth   = 0.5;
+  ctx.beginPath(); ctx.moveTo(0, sepY); ctx.lineTo(W, sepY); ctx.stroke();
+
+  // ── Sub-row 2: Mode strip (RM_MODE_H px) ─────────────────────────────────
+  const modeY  = sepY + 1;          // 1px gap after separator
+  const modeH  = RM_MODE_H - 1;     // usable height
+  const nSlots = DISPLAY_MODE_SLOTS.length;   // 4
+
+  // Evenly divide the full width among 4 chips
+  const chipW   = Math.floor((W - RM_PAD * 2) / nSlots);
+  const chipGap = Math.floor(((W - RM_PAD * 2) - chipW * nSlots) / (nSlots - 1));
+  const chipH   = modeH - 2;        // 1px top+bottom margin
+  const chipY   = modeY + 1;
+
+  for (let si = 0; si < nSlots; si++) {
+    const slot    = DISPLAY_MODE_SLOTS[si];
+    const active  = slot.test(modeSet) && hasData;
+    const chipX   = RM_PAD + si * (chipW + chipGap);
+    const qSnr    = modeQuality?.[slot.qKey] ?? null;
+
+    if (active) {
+      // Active: green background fill
+      ctx.fillStyle = t.green;
+      ctx.fillRect(chipX, chipY, chipW, chipH);
+
+      // Mini 3-segment S-meter strip — bottom 3px of chip
+      const meterH = 3;
+      const meterY = chipY + chipH - meterH;
+      const meterX = chipX + 1;
+      const meterW = chipW - 2;
+      drawMiniSmeter(ctx, meterX, meterY, meterW, meterH, qSnr, t);
+
+      // Label text — white, not bold
+      ctx.fillStyle    = '#ffffff';
+      ctx.font         = `9px "DejaVu Sans Mono"`;
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      // Center in upper portion of chip (above meter strip)
+      ctx.fillText(slot.label, chipX + chipW / 2, chipY + (chipH - meterH) / 2);
+    } else {
+      // Inactive: dim border only, no fill
+      ctx.strokeStyle = `rgba(${hexToRgb(t.border)},0.35)`;
+      ctx.lineWidth   = 0.75;
+      ctx.strokeRect(chipX + 0.5, chipY + 0.5, chipW - 1, chipH - 1);
+
+      // Label text — dim, not bold
+      ctx.fillStyle    = t.textDim;
+      ctx.font         = `9px "DejaVu Sans Mono"`;
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(slot.label, chipX + chipW / 2, chipY + chipH / 2);
     }
   }
 }
@@ -759,10 +807,14 @@ function renderRegionMeter(params) {
   ctx.font         = '8px "DejaVu Sans Mono"';
   ctx.textAlign    = 'center';
   ctx.textBaseline = 'middle';
-  const ageStr  = dataAge < 120 ? `${dataAge}s ago` : `${Math.floor(dataAge/60)}m ago`;
+  // Show HH:MM UTC timestamp of the data (now minus dataAge seconds)
+  const dataTs  = new Date(Date.now() - dataAge * 1000);
+  const hh      = String(dataTs.getUTCHours()).padStart(2, '0');
+  const mm      = String(dataTs.getUTCMinutes()).padStart(2, '0');
+  const timeStr = `${hh}:${mm} UTC`;
   const ftrText = rbnCount || ftxCount
-    ? `RBN:${rbnCount}  FTx:${ftxCount}  · ${ageStr}`
-    : `no data · ${ageStr}`;
+    ? `RBN:${rbnCount}  FTx:${ftxCount}  · ${timeStr}`
+    : `no data · ${timeStr}`;
   ctx.fillText(ftrText, RM_W / 2, ftrY + RM_FTR / 2, RM_W - 8);
 
   // ── Branding bar (22px) — HFSIGNALS.LIVE prominent ───────────────────────
