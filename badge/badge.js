@@ -25,7 +25,7 @@ const { createCanvas } = require('canvas');
 
 const PORT         = process.env.PORT || 3002;
 const DATA_TTL_MS  = 60  * 1000;        // re-fetch spot data every 60s
-const CACHE_TTL_MS = 10  * 60 * 1000;   // reuse rendered PNG for 10 min
+const CACHE_TTL_MS =  2  * 60 * 1000;   // reuse rendered PNG for 2 min
 const MAX_AGE_MS   = 30  * 60 * 1000;   // evict cached PNGs older than 30 min
 
 const RBN_URL  = process.env.RBN_PROXY_URL  || 'http://rbn-smeter:3001/rbn';
@@ -526,9 +526,6 @@ function computeRegionBand(data, fromKey, toKey, bandLabel) {
   }
 
   const med = median(snrs);
-  if (Number.isFinite(modeSnrs.CW.length   && median(modeSnrs.CW  ))) modeQuality.CW   = median(modeSnrs.CW);
-  if (Number.isFinite(modeSnrs.SSB.length  && median(modeSnrs.SSB ))) modeQuality.SSB  = median(modeSnrs.SSB);
-  if (Number.isFinite(modeSnrs.RTTY.length && median(modeSnrs.RTTY))) modeQuality.RTTY = median(modeSnrs.RTTY);
   ['CW','SSB','RTTY'].forEach(k => {
     const v = median(modeSnrs[k]);
     if (Number.isFinite(v)) modeQuality[k] = v;
@@ -597,21 +594,18 @@ function segColor(i, t) {
 // ── Draw one band row ─────────────────────────────────────────────────────────
 // y = top of this row within the canvas
 function drawBandRow(ctx, y, bandLabel, result, t) {
-  const { snr, hasData } = result;
+  const { snr, hasData, modes, modeQuality } = result;
   const rowX = 0;
   const W    = RM_W;
 
-  // Row background (alternating) — subtle, not in CSS but nice for readability
-  // (just use bg, no alternating)
-
-  // Band label — left column, accent colored, bold 11px, width 34px
+  // Band label — left, accent, bold 11px
   ctx.fillStyle    = t.accent;
   ctx.font         = 'bold 11px "DejaVu Sans Mono"';
   ctx.textAlign    = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillText(bandLabel, rowX + RM_PAD, y + RM_ROW / 2);
 
-  // S-unit — right column, 36px wide
+  // S-unit — right column
   const sStr = hasData ? snrToSUnit(snr) : '--';
   ctx.fillStyle    = hasData ? t.green : t.noData;
   ctx.font         = 'bold 9px "DejaVu Sans Mono"';
@@ -624,7 +618,7 @@ function drawBandRow(ctx, y, bandLabel, result, t) {
   const barW = W - RM_PAD * 2 - RM_LABEL_W - RM_SUNIT_W;
   const barY = y + (RM_ROW - RM_BAR_H) / 2;
 
-  // Bar background + border (matches .bar-wrap)
+  // Bar background
   ctx.fillStyle = t.dimSeg;
   ctx.fillRect(barX, barY, barW, RM_BAR_H);
   ctx.strokeStyle = `rgba(${hexToRgb(t.border)},0.25)`;
@@ -632,6 +626,7 @@ function drawBandRow(ctx, y, bandLabel, result, t) {
   ctx.strokeRect(barX - 0.5, barY - 0.5, barW + 1, RM_BAR_H + 1);
 
   if (hasData) {
+    // Segment fill
     const gap  = 1;
     const segW = (barW - gap * (RM_SEG - 1)) / RM_SEG;
     const lit  = Math.round(Math.min(snr / MAX_SNR, 1) * RM_SEG);
@@ -639,6 +634,42 @@ function drawBandRow(ctx, y, bandLabel, result, t) {
       const sx = barX + i * (segW + gap);
       ctx.fillStyle = i < lit ? segColor(i, t) : t.dimSeg;
       ctx.fillRect(sx, barY, segW, RM_BAR_H);
+    }
+
+    // Mode pills — rendered inside the bar, right-aligned
+    // Each pill: 2-char label (CW, FT, RT) in a small rounded rect
+    const PILL_SLOTS = [
+      { key: 'CW',   label: 'CW' },
+      { key: 'FTx',  label: 'FT' },
+      { key: 'RTTY', label: 'RT' },
+    ];
+    const pillH  = RM_BAR_H - 2;   // 1px margin top/bottom
+    const pillW  = 14;
+    const pillGap = 2;
+    const activeModes = PILL_SLOTS.filter(p =>
+      p.key === 'FTx' ? (modes instanceof Set ? modes.has('FT8') : false)
+                      : (modes instanceof Set ? modes.has(p.key) : false)
+    );
+    if (activeModes.length > 0) {
+      let px = barX + barW - 1;  // start from right edge of bar
+      for (let pi = activeModes.length - 1; pi >= 0; pi--) {
+        px -= pillW;
+        const pill = activeModes[pi];
+        // Pill background — semi-transparent accent
+        ctx.fillStyle = `rgba(${hexToRgb(t.accent)},0.25)`;
+        ctx.fillRect(px, barY + 1, pillW, pillH);
+        // Pill border
+        ctx.strokeStyle = `rgba(${hexToRgb(t.accent)},0.70)`;
+        ctx.lineWidth = 0.75;
+        ctx.strokeRect(px + 0.5, barY + 1.5, pillW - 1, pillH - 1);
+        // Pill text
+        ctx.fillStyle    = t.accent;
+        ctx.font         = `bold 7px "DejaVu Sans Mono"`;
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(pill.label, px + pillW / 2, barY + RM_BAR_H / 2);
+        px -= pillGap;
+      }
     }
   }
 }
