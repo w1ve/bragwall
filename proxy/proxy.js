@@ -195,6 +195,19 @@ function initHistoryDb() {
     histDb = new Database(HISTORY_DB_PATH);
     histDb.pragma('journal_mode = WAL');
     histDb.pragma('synchronous = NORMAL');
+
+    // ── Schema migration: drop old from_rgn/to_rgn layout ──────────────────
+    // Earlier versions stored per-direction rows; current code uses vantage_key.
+    // If the table exists with the old schema, drop it so it gets recreated.
+    const cols = histDb.prepare(
+      "SELECT name FROM pragma_table_info('band_snr')"
+    ).all().map(r => r.name);
+    if (cols.length > 0 && !cols.includes('vantage_key')) {
+      console.log('[history] old schema detected — dropping band_snr for migration');
+      histDb.exec('DROP TABLE IF EXISTS band_snr; DROP INDEX IF EXISTS idx_band_snr_vantage_ts;');
+    }
+    // ───────────────────────────────────────────────────────────────────────
+
     histDb.exec(`
       CREATE TABLE IF NOT EXISTS band_snr (
         ts          INTEGER NOT NULL,
