@@ -1869,7 +1869,7 @@ async function resolveAsyncVoiceId() {
   return asyncVoiceLookupPromise;
 }
 
-async function streamAsyncTtsToFile(transcript, lang, outPath, httpRes = null) {
+async function streamAsyncTtsToFile(transcript, lang, outPath, httpRes = null, options = {}) {
   if (!ASYNC_API_KEY) throw new Error('ASYNC_API_KEY not configured');
   const voiceId = await resolveAsyncVoiceId();
   const detectedLang = outputLanguage(lang);
@@ -1890,6 +1890,18 @@ async function streamAsyncTtsToFile(transcript, lang, outPath, httpRes = null) {
   const bodyText = JSON.stringify(payload);
   const tmpPath = `${outPath}.tmp-${Date.now()}`;
   const fileStream = fs.createWriteStream(tmpPath);
+  let wroteHttpChunk = false;
+  let firstChunkSeen = false;
+  const beforeFirstChunk = typeof options.beforeFirstChunk === 'function'
+    ? options.beforeFirstChunk
+    : null;
+  const withStreamState = (err) => {
+    if (!err || typeof err !== 'object') return err;
+    if (!Object.prototype.hasOwnProperty.call(err, 'httpChunkWritten')) {
+      err.httpChunkWritten = wroteHttpChunk;
+    }
+    return err;
+  };
 
   await new Promise((resolve, reject) => {
     const req = https.request(
@@ -1914,7 +1926,7 @@ async function streamAsyncTtsToFile(transcript, lang, outPath, httpRes = null) {
           upstream.on('end', () => {
             fileStream.destroy();
             fs.promises.unlink(tmpPath).catch(() => {});
-            reject(new Error(`tts_${upstream.statusCode}:${Buffer.concat(chunks).toString('utf8').slice(0, 300)}`));
+            reject(withStreamState(new Error(`tts_${upstream.statusCode}:${Buffer.concat(chunks).toString('utf8').slice(0, 300)}`)));
           });
           return;
         }
@@ -1922,16 +1934,25 @@ async function streamAsyncTtsToFile(transcript, lang, outPath, httpRes = null) {
         // If the client disconnects mid-stream we swallow the write error and keep
         // writing to the file so the cache is still populated for the next request.
         upstream.on('data', (chunk) => {
+          if (!firstChunkSeen) {
+            firstChunkSeen = true;
+            if (beforeFirstChunk) {
+              try { beforeFirstChunk(); } catch (_) {}
+            }
+          }
           fileStream.write(chunk);
           if (httpRes && !httpRes.writableEnded) {
-            try { httpRes.write(chunk); } catch (_) { /* client disconnected — continue caching */ }
+            try {
+              httpRes.write(chunk);
+              wroteHttpChunk = true;
+            } catch (_) { /* client disconnected — continue caching */ }
           }
         });
         upstream.on('end', () => { fileStream.end(); });
         upstream.on('error', (e) => {
           fileStream.destroy();
           fs.promises.unlink(tmpPath).catch(() => {});
-          reject(e);
+          reject(withStreamState(e));
         });
       }
     );
@@ -1939,12 +1960,12 @@ async function streamAsyncTtsToFile(transcript, lang, outPath, httpRes = null) {
     req.on('error', (e) => {
       fileStream.destroy();
       fs.promises.unlink(tmpPath).catch(() => {});
-      reject(e);
+      reject(withStreamState(e));
     });
     fileStream.on('finish', resolve);
     fileStream.on('error', (e) => {
       fs.promises.unlink(tmpPath).catch(() => {});
-      reject(e);
+      reject(withStreamState(e));
     });
     req.end(bodyText);
   });
@@ -2145,65 +2166,48 @@ async function serveAudioPropReport(req, res, query = {}) {
   try {
     await deleteMatchingAudio(prefix);
     const dynamicPath = `${outPath}.dynamic-tmp`;
-
-    // Non-English requests are generated in buffered mode (no live client tee).
-    // This avoids partial-stream playback errors when upstream TTS rejects or
-    // truncates translated script output mid-response.
-    const bufferedMode = requestedLang !== 'en';
     let usedEnglishTtsFallback = false;
     let responseLang = requestedLang;
-
-    if (bufferedMode) {
-      console.log('[audio] cache miss — buffered TTS generation:', fileName);
-      try {
-        await streamAsyncTtsToFile(transcript, params.lang, dynamicPath);
-      } catch (ttsErr) {
-        const canFallbackToEnglish = transcript !== englishText && requestedLang !== 'en';
-        if (!canFallbackToEnglish) throw ttsErr;
-        console.warn('[audio] translated-script TTS failed; retrying English fallback:', ttsErr?.message || ttsErr);
-        await streamAsyncTtsToFile(englishText, 'en', dynamicPath);
-        usedEnglishTtsFallback = true;
-        responseLang = 'en';
-      }
-
-      if (responseLang === 'en') {
-        await ensureOutroAudio();
-        await concatMp3Files(dynamicPath, OUTRO_AUDIO_PATH, outPath);
-        fs.promises.unlink(dynamicPath).catch(() => {});
-      } else {
-        await fs.promises.rename(dynamicPath, outPath);
-      }
-
-      resolveInFlight();
-      sendAudioFile(res, outPath, true, responseLang);
-      return;
-    }
-
-    // Start streaming headers before we begin TTS — client can start buffering immediately
-    res.writeHead(200, {
-      ...CORS,
-      'Content-Type': 'audio/mpeg',
-      'Transfer-Encoding': 'chunked',
-      'Cache-Control': 'no-store',
-      'X-HFSIGNALS-Audio': 'streaming',
-      'X-HFSIGNALS-Filename': fileName,
-      'X-HFSIGNALS-Language': responseLang,
-      'X-HFSIGNALS-Tooltip': audioTooltipText(responseLang),
-      'Access-Control-Expose-Headers': 'X-HFSIGNALS-Audio, X-HFSIGNALS-Filename, X-HFSIGNALS-Language, X-HFSIGNALS-Tooltip',
-    });
+    let streamHeadersSent = false;
+    const writeStreamingHeaders = (langCode) => {
+      if (streamHeadersSent || res.headersSent) return;
+      res.writeHead(200, {
+        ...CORS,
+        'Content-Type': 'audio/mpeg',
+        'Transfer-Encoding': 'chunked',
+        'Cache-Control': 'no-store',
+        'X-HFSIGNALS-Audio': 'streaming',
+        'X-HFSIGNALS-Filename': fileName,
+        'X-HFSIGNALS-Language': langCode,
+        'X-HFSIGNALS-Tooltip': audioTooltipText(langCode),
+        'Access-Control-Expose-Headers': 'X-HFSIGNALS-Audio, X-HFSIGNALS-Filename, X-HFSIGNALS-Language, X-HFSIGNALS-Tooltip',
+      });
+      streamHeadersSent = true;
+    };
 
     console.log('[audio] cache miss — streaming live TTS:', fileName);
 
     try {
-      await streamAsyncTtsToFile(transcript, params.lang, dynamicPath, res);
+      await streamAsyncTtsToFile(transcript, params.lang, dynamicPath, res, {
+        beforeFirstChunk: () => writeStreamingHeaders(requestedLang),
+      });
     } catch (ttsErr) {
-      const canFallbackToEnglish = transcript !== englishText && requestedLang !== 'en';
+      // Retry in English only when the first attempt failed before any audio
+      // bytes were sent to the client. Once chunks are sent, we cannot
+      // "restart" the stream cleanly over the same response.
+      const canFallbackToEnglish = transcript !== englishText
+        && requestedLang !== 'en'
+        && !ttsErr?.httpChunkWritten
+        && !res.writableEnded;
       if (!canFallbackToEnglish) throw ttsErr;
       console.warn('[audio] translated-script TTS failed; retrying English fallback:', ttsErr?.message || ttsErr);
-      await streamAsyncTtsToFile(englishText, 'en', dynamicPath, res);
-      usedEnglishTtsFallback = true;
       responseLang = 'en';
+      await streamAsyncTtsToFile(englishText, 'en', dynamicPath, res, {
+        beforeFirstChunk: () => writeStreamingHeaders('en'),
+      });
+      usedEnglishTtsFallback = true;
     }
+    if (!streamHeadersSent) writeStreamingHeaders(responseLang);
 
     // Stitch static outro (English only) — do this after client has received all dynamic audio
     if (responseLang === 'en' || !params.lang || usedEnglishTtsFallback) {
