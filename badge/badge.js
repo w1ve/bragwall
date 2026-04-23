@@ -378,7 +378,22 @@ function fetchRbn() {
       const chunks = [];
       res.on('data', c => chunks.push(c));
       res.on('end', () => {
-        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
+        try {
+          const raw = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          // Proxy returns a flat object keyed by "dxcall|band".
+          // Normalise to { spots: [ { dxCall, freq, mode, lsn }, ... ] }
+          if (raw && typeof raw === 'object' && !Array.isArray(raw) && !raw.spots) {
+            const spots = Object.values(raw).map(s => ({
+              dxCall: s.dxcall || s.dxCall || '',
+              freq:   parseFloat(s.freq),
+              mode:   s.mode  || '',
+              lsn:    s.lsn   || {},
+            }));
+            resolve({ spots });
+          } else {
+            resolve(raw);
+          }
+        }
         catch (e) { reject(e); }
       });
     });
