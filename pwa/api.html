@@ -436,15 +436,15 @@
         <div class="live-title">▶ LIVE EXAMPLES — ENA → EU, ALL THEMES</div>
         <div class="live-grid">
           <div class="live-item">
-            <img src="/badge/region?from=ENA&to=EU&theme=dark" alt="dark" loading="lazy">
+            <img id="ex-region-dark" alt="dark">
             <div class="live-label">dark theme</div>
           </div>
           <div class="live-item">
-            <img src="/badge/region?from=ENA&to=EU&theme=light" alt="light" loading="lazy">
+            <img id="ex-region-light" alt="light">
             <div class="live-label">light theme</div>
           </div>
           <div class="live-item">
-            <img src="/badge/region?from=ENA&to=EU&theme=cb" alt="cb" loading="lazy">
+            <img id="ex-region-cb" alt="cb">
             <div class="live-label">cb theme</div>
           </div>
         </div>
@@ -498,15 +498,15 @@
         <div class="live-title">▶ LIVE EXAMPLES — FN30, 500 mi radius, ALL THEMES</div>
         <div class="live-grid">
           <div class="live-item">
-            <img src="/badge/grid?grid=FN30&radius=500&theme=dark" alt="dark" loading="lazy">
+            <img id="ex-grid-dark" alt="dark">
             <div class="live-label">dark theme</div>
           </div>
           <div class="live-item">
-            <img src="/badge/grid?grid=FN30&radius=500&theme=light" alt="light" loading="lazy">
+            <img id="ex-grid-light" alt="light">
             <div class="live-label">light theme</div>
           </div>
           <div class="live-item">
-            <img src="/badge/grid?grid=FN30&radius=500&theme=cb" alt="cb" loading="lazy">
+            <img id="ex-grid-cb" alt="cb">
             <div class="live-label">cb theme</div>
           </div>
         </div>
@@ -761,5 +761,30 @@
   applyTheme(saved);
 </script>
 
+
+<script>
+// Force-bypass any service worker cache for live badge examples
+(function() {
+  const t = Date.now();
+  const imgs = [
+    ['ex-region-dark',  '/badge/region?from=ENA&to=EU&theme=dark&_t='],
+    ['ex-region-light', '/badge/region?from=ENA&to=EU&theme=light&_t='],
+    ['ex-region-cb',    '/badge/region?from=ENA&to=EU&theme=cb&_t='],
+    ['ex-grid-dark',    '/badge/grid?grid=FN30&radius=500&theme=dark&_t='],
+    ['ex-grid-light',   '/badge/grid?grid=FN30&radius=500&theme=light&_t='],
+    ['ex-grid-cb',      '/badge/grid?grid=FN30&radius=500&theme=cb&_t='],
+  ];
+  imgs.forEach(([id, base]) => {
+    const el = document.getElementById(id);
+    if (el) el.src = base + t;
+  });
+  // Unregister stale service workers so updated SW installs immediately
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(regs => {
+      regs.forEach(r => r.update());
+    });
+  }
+})();
+</script>
 </body>
 </html>
