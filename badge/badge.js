@@ -442,14 +442,11 @@ function fetchRbn() {
               mode:   s.mode  || '',
               lsn:    s.lsn   || {},
             })).filter(s => s.dxCall && Number.isFinite(s.freq));
-            console.log(`[badge] fetchRbn: ${spots.length} spots normalised`);
             if (spots.length > 0) {
               const s0 = spots[0];
-              console.log(`[badge] sample spot: dxCall=${s0.dxCall} freq=${s0.freq} mode=${s0.mode} lsn_keys=${Object.keys(s0.lsn||{}).slice(0,3).join(',')}`);
             }
             resolve({ spots });
           } else {
-            console.log('[badge] fetchRbn: raw already has spots array, len=', (raw.spots||[]).length);
             resolve(raw);
           }
         }
@@ -547,7 +544,6 @@ function median(arr) {
 
 function computeRegionBand(data, fromKey, toKey, bandLabel) {
   const spots = data?.spots || [];
-  console.log(`[badge] computeRegionBand ${fromKey}→${toKey} ${bandLabel}: total spots=${spots.length}`);
   let dbgBand=0, dbgTo=0;
   for (const sp of spots) {
     if (bandForFreq(sp.freq) === bandLabel) {
@@ -555,7 +551,6 @@ function computeRegionBand(data, fromKey, toKey, bandLabel) {
       if (classifyCall(sp.dxCall) === toKey) dbgTo++;
     }
   }
-  console.log(`[badge]   band match=${dbgBand} toKey match=${dbgTo}`);
   const snrs  = [], modes = new Set();
   const modeQuality = emptyModeQuality();
   const modeSnrs    = { CW: [], SSB: [], RTTY: [], FTx: [] };
@@ -1327,7 +1322,6 @@ const server = http.createServer(async (req, res) => {
 
   // Cache hit?
   const now    = Date.now();
-  console.log(`[badge] req theme="${theme}" cacheKey="${cacheKey}" rawQuery="${url.parse(req.url).query}"`);
   const cached = pngCache.get(cacheKey);
   if (cached && (now - cached.createdAt) < CACHE_TTL_MS) {
     sendPng(res, cached.png, now - cached.createdAt, false); return;
