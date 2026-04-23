@@ -766,27 +766,42 @@
 
 
 <script>
-// Force-bypass any service worker cache for live badge examples
+// Live badge examples — cache URLs in sessionStorage so images aren't re-fetched
+// on every page visit; bust the cache every 60 seconds (badge TTL)
 (function() {
-  const t = Date.now();
+  const CACHE_TTL = 60 * 1000; // 60 s — matches server badge max-age
   const imgs = [
-    ['ex-region-dark',  '/badge/region?from=ENA&to=EU&theme=dark&_t='],
-    ['ex-region-light', '/badge/region?from=ENA&to=EU&theme=light&_t='],
-    ['ex-region-cb',    '/badge/region?from=ENA&to=EU&theme=cb&_t='],
-    ['ex-grid-dark',    '/badge/grid?grid=FN30&radius=500&theme=dark&_t='],
-    ['ex-grid-light',   '/badge/grid?grid=FN30&radius=500&theme=light&_t='],
-    ['ex-grid-cb',      '/badge/grid?grid=FN30&radius=500&theme=cb&_t='],
+    ['ex-region-dark',  '/badge/region?from=ENA&to=EU&theme=dark'],
+    ['ex-region-light', '/badge/region?from=ENA&to=EU&theme=light'],
+    ['ex-region-cb',    '/badge/region?from=ENA&to=EU&theme=cb'],
+    ['ex-grid-dark',    '/badge/grid?grid=FN30&radius=500&theme=dark'],
+    ['ex-grid-light',   '/badge/grid?grid=FN30&radius=500&theme=light'],
+    ['ex-grid-cb',      '/badge/grid?grid=FN30&radius=500&theme=cb'],
   ];
+  const now = Date.now();
   imgs.forEach(([id, base]) => {
     const el = document.getElementById(id);
-    if (el) el.src = base + t;
+    if (!el) return;
+    const storageKey = 'badge-cache-' + id;
+    let cached = null;
+    try { cached = JSON.parse(sessionStorage.getItem(storageKey)); } catch {}
+    // Use cached URL if it's still fresh
+    if (cached && cached.url && (now - cached.ts) < CACHE_TTL) {
+      el.src = cached.url;
+    } else {
+      // Fetch fresh — append timestamp to bypass any browser/SW cache
+      const url = base + '&_t=' + now;
+      el.src = url;
+      el.onload = function() {
+        try { sessionStorage.setItem(storageKey, JSON.stringify({ url, ts: now })); } catch {}
+      };
+    }
   });
-  // Force-unregister any old service worker and clear all SW caches
+  // Unregister any old service worker so it can't intercept badge requests
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.getRegistrations().then(regs => {
       regs.forEach(r => r.unregister());
     });
-    caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
   }
 })();
 </script>

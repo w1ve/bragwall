@@ -2109,6 +2109,31 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
+  // ── Public API convenience routes: /audio/region and /audio/grid ──────────
+  if (parts[0] === 'audio' && parts[1] === 'region') {
+    // /audio/region?from=ENA&to=ENA&modes=cw,ft8
+    const q = parsed.query || {};
+    const apiQuery = { mode: 'region', from: q.from || 'ENA', to: q.to || 'all' };
+    if (q.modes) apiQuery.modes = q.modes;
+    if (q.band)  apiQuery.band  = q.band;
+    try { await serveAudioPropReport(req, res, apiQuery); } catch (e) {
+      console.error('[audio/region] error:', e?.message || e);
+      sendJson(res, 502, { error: 'audio_error', reason: String(e?.message || e || 'unknown') });
+    }
+    return;
+  }
+  if (parts[0] === 'audio' && parts[1] === 'grid') {
+    // /audio/grid?grid=FN30&radius=500&modes=cw,ft8
+    const q = parsed.query || {};
+    const apiQuery = { mode: 'grid', grid: q.grid || '', radius: q.radius || '500', unit: q.unit || 'mi' };
+    if (q.modes) apiQuery.modes = q.modes;
+    if (q.band)  apiQuery.band  = q.band;
+    try { await serveAudioPropReport(req, res, apiQuery); } catch (e) {
+      console.error('[audio/grid] error:', e?.message || e);
+      sendJson(res, 502, { error: 'audio_error', reason: String(e?.message || e || 'unknown') });
+    }
+    return;
+  }
   if (parts[0] === 'health') {
     send(res, 200, 'application/json', JSON.stringify({
       status: 'ok', telnet: telnetReady,
