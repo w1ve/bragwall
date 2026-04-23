@@ -150,7 +150,11 @@ server {
     }
 
     # ── Other static assets (icons etc.) ────────────────────────────────────
-    location ~* \.(png|ico|webp)$ {
+    # Note: .png intentionally excluded — badge routes return dynamic PNGs and
+    # have their own Cache-Control: no-cache headers set in the /badge/ block above.
+    # Static app icons (icon-192.png etc.) are served with the default no-cache
+    # from the catch-all location / block, which is acceptable.
+    location ~* \.(ico|webp)$ {
         expires 7d;
         add_header Cache-Control "public, max-age=604800";
     }
