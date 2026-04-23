@@ -144,18 +144,18 @@ h1 {
 
 .api-docs-link {
   font-family: 'Orbitron', monospace;
-  font-size: 14px;
+  font-size: 10px;
   font-weight: 700;
   color: #ffffff;
   background: var(--accent2);
-  border: 2px solid var(--accent);
-  border-radius: 5px;
-  padding: 8px 20px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 5px 11px;
   text-decoration: none;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.07em;
   white-space: nowrap;
   transition: background 0.15s, color 0.15s, box-shadow 0.15s;
-  box-shadow: 0 0 10px rgba(0,212,170,0.45);
+  box-shadow: 0 0 7px rgba(0,212,170,0.35);
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
@@ -165,7 +165,7 @@ h1 {
 .api-docs-link:hover {
   background: var(--accent);
   color: var(--bg);
-  box-shadow: 0 0 20px rgba(0,212,170,0.75);
+  box-shadow: 0 0 14px rgba(0,212,170,0.65);
 }
 
 @media (max-width: 400px) {
