@@ -380,15 +380,17 @@ function fetchRbn() {
       res.on('end', () => {
         try {
           const raw = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-          // Proxy returns a flat object keyed by "dxcall|band".
-          // Normalise to { spots: [ { dxCall, freq, mode, lsn }, ... ] }
+          // Proxy returns a flat object keyed by "dxcall|band" (spotMap format)
+          // OR the raw HamQTH passthrough (same shape but freq has spaces: "14 039.5").
+          // Normalise both to { spots: [ { dxCall, freq, mode, lsn }, ... ] }
           if (raw && typeof raw === 'object' && !Array.isArray(raw) && !raw.spots) {
             const spots = Object.values(raw).map(s => ({
               dxCall: s.dxcall || s.dxCall || '',
-              freq:   parseFloat(s.freq),
+              // HamQTH freq may have spaces ("14 039.5") — strip them before parsing
+              freq:   parseFloat(String(s.freq).replace(/\s/g, '')),
               mode:   s.mode  || '',
               lsn:    s.lsn   || {},
-            }));
+            })).filter(s => s.dxCall && Number.isFinite(s.freq));
             resolve({ spots });
           } else {
             resolve(raw);
@@ -1191,8 +1193,10 @@ const server = http.createServer(async (req, res) => {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function parseTheme(raw) {
-  const s = (raw || '').toLowerCase();
-  return (s === 'light' || s === 'cr' || s === 'dark') ? s : 'dark';
+  const s = (raw || '').toLowerCase().trim();
+  if (s === 'light') return 'light';
+  if (s === 'cr' || s === 'cb') return 'cr';  // cb = public alias for cr
+  return 'dark';
 }
 
 function sendPng(res, png, ageMs, warming, extra = {}) {
