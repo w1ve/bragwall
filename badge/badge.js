@@ -80,6 +80,8 @@ const REGION_ALIASES = {
   'CAR':'CAR','CARIBBEAN':'CAR',
   'SA':'SA','EU':'EU','AF':'AF','AS':'AS','OC':'OC',
   'E.NA':'ENA','W.NA':'WNA','C.NA':'CNA',
+  'E.N.AMERICA':'ENA','C.N.AMERICA':'CNA','W.N.AMERICA':'WNA',
+  'EASTERN NORTH AMERICA':'ENA','CENTRAL NORTH AMERICA':'CNA','WESTERN NORTH AMERICA':'WNA',
 };
 
 // ── Themes — matches PWA CSS variables ───────────────────────────────────────
