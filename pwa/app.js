@@ -2588,7 +2588,7 @@ const HISTORY_SNR_MAX  = 60;
 const HISTORY_WINDOW_S = 24 * 60 * 60;
 
 // SVG margins
-const HM = { top: 10, right: 10, bottom: 52, left: 34 };
+const HM = { top: 10, right: 6,  bottom: 52, left: 30 };
 
 let historyRefreshTimer  = null;
 let historyLastVantage   = null; // last vantage key fetched — skip redundant fetches

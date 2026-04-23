@@ -497,8 +497,8 @@ body.theme-cb .theme-btn.active {
   border-right: 1px solid rgba(0,212,170,0.15);
   padding: 8px 12px 9px;
   text-align: center;
-  width: 320px;
-  min-width: 320px;
+  width: 390px;
+  min-width: 390px;
   align-self: stretch;
   display: flex;
   flex-direction: column;
@@ -1256,7 +1256,7 @@ body::after {
 
 /* Chart element styles (applied via SVG attributes but theme-aware via CSS vars) */
 .history-axis-line  { stroke: var(--text); stroke-width: 1; opacity: 0.5; }
-.history-tick-label { fill: var(--text); font-size: 11px; font-family: 'Share Tech Mono', monospace; opacity: 0.85; }
+.history-tick-label { fill: var(--text); font-size: 10px; font-family: 'Share Tech Mono', monospace; opacity: 0.85; }
 .history-grid-line  { stroke: var(--text); stroke-width: 0.5; stroke-dasharray: 2 4; opacity: 0.2; }
 .history-legend-text { fill: var(--text); font-size: 11px; font-family: 'Share Tech Mono', monospace; }
 
