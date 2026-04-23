@@ -2002,6 +2002,31 @@ async function serveAudioPropReport(req, res, query = {}) {
   const fileName = `${prefix}${bucket}.mp3`;
   const outPath  = path.join(AUDIO_CACHE_DIR, fileName);
 
+  // ?info=1 — lightweight status probe from the browser.
+  // Returns headers indicating cache status WITHOUT triggering generation.
+  // Avoids the race condition caused by a concurrent fetch + Audio(url) both
+  // hitting the same endpoint and fighting over the .dynamic-tmp file.
+  const isInfoProbe = query.info === '1' || query.info === 'true';
+  if (isInfoProbe) {
+    let cached = false;
+    try {
+      const st = await fs.promises.stat(outPath);
+      cached = (Date.now() - st.mtimeMs) < AUDIO_CACHE_MS;
+    } catch {}
+    res.writeHead(200, {
+      ...CORS,
+      'Content-Type': 'application/json',
+      'Content-Length': '2',
+      'X-HFSIGNALS-Audio': cached ? 'cached' : 'streaming',
+      'X-HFSIGNALS-Filename': fileName,
+      'X-HFSIGNALS-Language': outputLanguage(params.lang),
+      'X-HFSIGNALS-Tooltip': audioTooltipText(params.lang),
+      'Access-Control-Expose-Headers': 'X-HFSIGNALS-Audio, X-HFSIGNALS-Filename, X-HFSIGNALS-Language, X-HFSIGNALS-Tooltip',
+    });
+    res.end('{}');
+    return;
+  }
+
   try {
     const st = await fs.promises.stat(outPath);
     if ((Date.now() - st.mtimeMs) < AUDIO_CACHE_MS) {
