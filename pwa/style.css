@@ -1202,14 +1202,6 @@ body::after {
   text-transform: uppercase;
 }
 
-.history-to-select {
-  font-size: 11px;
-  padding: 2px 5px;
-  height: 22px;
-  min-width: 0;
-  flex: 1 1 auto;
-  max-width: 160px;
-}
 
 .history-svg {
   display: block;

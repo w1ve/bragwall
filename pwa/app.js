@@ -2564,72 +2564,66 @@ if ('serviceWorker' in navigator) {
 }
 
 
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ── Signal History Chart ──────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const HISTORY_BANDS = ['160m','80m','40m','30m','20m','17m','15m','12m','10m','6m'];
 
-// 10 visually distinct colors for the bands, chosen to work on both dark/light themes
 const HISTORY_BAND_COLORS = [
-  '#ff6b6b', // 160m - red
-  '#ff9f43', // 80m  - orange
-  '#ffd93d', // 40m  - yellow
-  '#6bcb77', // 30m  - green
-  '#00d4aa', // 20m  - teal (accent)
-  '#4ecdc4', // 17m  - cyan-teal
-  '#45aaf2', // 15m  - blue
-  '#a29bfe', // 12m  - lavender
-  '#fd79a8', // 10m  - pink
-  '#b2bec3', // 6m   - silver
+  '#ff6b6b', // 160m
+  '#ff9f43', // 80m
+  '#ffd93d', // 40m
+  '#6bcb77', // 30m
+  '#00d4aa', // 20m  (accent)
+  '#4ecdc4', // 17m
+  '#45aaf2', // 15m
+  '#a29bfe', // 12m
+  '#fd79a8', // 10m
+  '#b2bec3', // 6m
 ];
 
 const HISTORY_SNR_MAX  = 60;
-const HISTORY_WINDOW_S = 24 * 60 * 60; // 24 hours in seconds
+const HISTORY_WINDOW_S = 24 * 60 * 60;
 
-// Margins inside the SVG viewport (in SVG user units, mapped from pixel height)
-const HM = { top: 8, right: 8, bottom: 28, left: 32 }; // px equivalent
+// SVG margins
+const HM = { top: 8, right: 8, bottom: 28, left: 32 };
 
-let historyRefreshTimer = null;
-let historyLastFetchKey = null; // "fromRgn|toRgn" — avoid redundant fetches
+let historyRefreshTimer  = null;
+let historyLastVantage   = null; // last vantage key fetched — skip redundant fetches
 
-function historyFromRegion() {
+// ── Derive vantage region key from current UI state ───────────────────────────
+function historyVantageKey() {
   const mode = document.querySelector('input[name="vantage-mode"]:checked')?.value || 'region';
   if (mode === 'region') {
     const idx = parseInt(document.getElementById('region-select')?.value || '0', 10);
     return SOURCE_REGION_KEYS[idx] || 'ENA';
   }
-  // Grid mode: derive region from grid square
+  // Grid mode: map grid center to the nearest region
   const grid = (document.getElementById('grid-input')?.value || '').trim().toUpperCase();
   if (grid.length >= 4) {
     const ll = gridToLatLon(grid);
     if (ll) {
-      // Use the same region classification the proxy uses
-      const ri = regionFromLatLon ? regionFromLatLon(ll.lat, ll.lon) : null;
-      if (ri) return ri;
+      const key = regionFromLatLon(ll.lat, ll.lon);
+      if (key) return key;
     }
   }
   return 'ENA';
 }
 
-function historyToRegion() {
-  return document.getElementById('history-to-select')?.value || 'EU';
-}
-
+// ── Fetch + draw ──────────────────────────────────────────────────────────────
 async function fetchAndDrawHistory({ force = false } = {}) {
-  const svg = document.getElementById('history-svg');
+  const svg  = document.getElementById('history-svg');
   const note = document.getElementById('history-note');
   if (!svg) return;
 
-  const fromRgn = historyFromRegion();
-  const toRgn   = historyToRegion();
-  const fetchKey = `${fromRgn}|${toRgn}`;
-
-  if (!force && fetchKey === historyLastFetchKey) return;
-  historyLastFetchKey = fetchKey;
+  const vantage = historyVantageKey();
+  if (!force && vantage === historyLastVantage) return;
+  historyLastVantage = vantage;
 
   try {
-    const resp = await fetch(`${PROXY_BASE}/history?from=${fromRgn}&to=${toRgn}`,
+    const resp = await fetch(`${PROXY_BASE}/history?vantage=${vantage}`,
       { signal: AbortSignal.timeout(8000) });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
@@ -2637,6 +2631,13 @@ async function fetchAndDrawHistory({ force = false } = {}) {
   } catch (e) {
     drawHistoryEmpty(svg, note, 'History unavailable');
   }
+}
+
+// ── SVG helpers ───────────────────────────────────────────────────────────────
+function makeSvgEl(tag, attrs = {}) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  return el;
 }
 
 function drawHistoryEmpty(svg, note, msg) {
@@ -2654,12 +2655,7 @@ function drawHistoryEmpty(svg, note, msg) {
   if (note) note.textContent = '';
 }
 
-function makeSvgEl(tag, attrs = {}) {
-  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
-  return el;
-}
-
+// ── Main chart renderer ───────────────────────────────────────────────────────
 function drawHistoryChart(svg, note, data) {
   svg.innerHTML = '';
 
@@ -2667,40 +2663,25 @@ function drawHistoryChart(svg, note, data) {
   const H = svg.clientHeight || 160;
   if (W < 10 || H < 10) return;
 
-  const pl = HM.left;
-  const pr = HM.right;
-  const pt = HM.top;
-  const pb = HM.bottom;
-  const cw = W - pl - pr; // chart width
-  const ch = H - pt - pb; // chart height
+  const pl = HM.left, pr = HM.right, pt = HM.top, pb = HM.bottom;
+  const cw = W - pl - pr;
+  const ch = H - pt - pb;
 
   const now   = Math.floor(Date.now() / 1000);
   const start = now - HISTORY_WINDOW_S;
 
-  // If no points at all, show empty state
   const pts = data.points || [];
   if (pts.length === 0) {
     drawHistoryEmpty(svg, note, 'No history yet — collecting data…');
     return;
   }
 
-  // ── Background ───────────────────────────────────────────────────────────
-  svg.appendChild(makeSvgEl('rect', {
-    x: pl, y: pt, width: cw, height: ch,
-    fill: 'rgba(13,13,26,0.0)'
-  }));
-
-  // ── Grid lines + Y-axis labels (0, 15, 30, 45, 60 dB) ───────────────────
-  const yTicks = [0, 15, 30, 45, 60];
-  for (const db of yTicks) {
+  // ── Y-axis grid lines + labels ────────────────────────────────────────────
+  for (const db of [0, 15, 30, 45, 60]) {
     const y = pt + ch - (db / HISTORY_SNR_MAX) * ch;
-    // Grid line
-    const gl = makeSvgEl('line', {
-      x1: pl, y1: y, x2: pl + cw, y2: y,
-      class: 'history-grid-line'
-    });
-    svg.appendChild(gl);
-    // Y label
+    svg.appendChild(makeSvgEl('line', {
+      x1: pl, y1: y, x2: pl + cw, y2: y, class: 'history-grid-line'
+    }));
     const lbl = makeSvgEl('text', {
       x: pl - 4, y: y + 1,
       'text-anchor': 'end', 'dominant-baseline': 'middle',
@@ -2710,44 +2691,29 @@ function drawHistoryChart(svg, note, data) {
     svg.appendChild(lbl);
   }
 
-  // ── X-axis time ticks (every 4 hours UTC) ────────────────────────────────
-  // Find the first tick >= start that lands on a 4-hour boundary
-  const TICK_INTERVAL = 4 * 3600; // 4h in seconds
+  // ── X-axis time ticks (every 4h UTC) ─────────────────────────────────────
+  const TICK_INTERVAL = 4 * 3600;
   const firstTick = Math.ceil(start / TICK_INTERVAL) * TICK_INTERVAL;
   for (let ts = firstTick; ts <= now; ts += TICK_INTERVAL) {
     const x = pl + ((ts - start) / HISTORY_WINDOW_S) * cw;
-    // Tick line
     svg.appendChild(makeSvgEl('line', {
-      x1: x, y1: pt + ch, x2: x, y2: pt + ch + 3,
-      class: 'history-axis-line'
+      x1: x, y1: pt + ch, x2: x, y2: pt + ch + 3, class: 'history-axis-line'
     }));
-    // UTC label "HH:MM"
     const d = new Date(ts * 1000);
     const hh = String(d.getUTCHours()).padStart(2, '0');
     const mm = String(d.getUTCMinutes()).padStart(2, '0');
     const lbl = makeSvgEl('text', {
-      x: x, y: pt + ch + 11,
-      'text-anchor': 'middle',
-      class: 'history-tick-label'
+      x, y: pt + ch + 11, 'text-anchor': 'middle', class: 'history-tick-label'
     });
     lbl.textContent = `${hh}:${mm}`;
     svg.appendChild(lbl);
   }
 
-  // ── Axes ─────────────────────────────────────────────────────────────────
-  // Y axis
-  svg.appendChild(makeSvgEl('line', {
-    x1: pl, y1: pt, x2: pl, y2: pt + ch,
-    class: 'history-axis-line'
-  }));
-  // X axis
-  svg.appendChild(makeSvgEl('line', {
-    x1: pl, y1: pt + ch, x2: pl + cw, y2: pt + ch,
-    class: 'history-axis-line'
-  }));
+  // ── Axes ──────────────────────────────────────────────────────────────────
+  svg.appendChild(makeSvgEl('line', { x1: pl, y1: pt, x2: pl, y2: pt + ch, class: 'history-axis-line' }));
+  svg.appendChild(makeSvgEl('line', { x1: pl, y1: pt + ch, x2: pl + cw, y2: pt + ch, class: 'history-axis-line' }));
 
-  // ── Build per-band time series ────────────────────────────────────────────
-  // Group points: band -> array of {ts, snr} sorted by ts
+  // ── Build per-band series ─────────────────────────────────────────────────
   const byBand = {};
   for (const band of HISTORY_BANDS) byBand[band] = [];
   for (const p of pts) {
@@ -2756,69 +2722,58 @@ function drawHistoryChart(svg, note, data) {
     }
   }
 
-  // Draw lines — bands with no data are skipped but still in legend
-  const activeBands = [];
+  // ── Draw lines ────────────────────────────────────────────────────────────
   for (let bi = 0; bi < HISTORY_BANDS.length; bi++) {
     const band   = HISTORY_BANDS[bi];
     const color  = HISTORY_BAND_COLORS[bi];
     const series = byBand[band];
     if (series.length < 2) continue;
-    activeBands.push({ band, color });
 
-    // Build SVG polyline points string
     const pointsStr = series.map(({ ts, snr }) => {
       const x = pl + ((ts - start) / HISTORY_WINDOW_S) * cw;
       const y = pt + ch - (snr / HISTORY_SNR_MAX) * ch;
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(' ');
 
-    const line = makeSvgEl('polyline', {
+    svg.appendChild(makeSvgEl('polyline', {
       points: pointsStr,
-      fill: 'none',
-      stroke: color,
+      fill: 'none', stroke: color,
       'stroke-width': '1.5',
-      'stroke-linejoin': 'round',
-      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round', 'stroke-linecap': 'round',
       opacity: '0.9'
-    });
-    svg.appendChild(line);
+    }));
   }
 
-  // ── Legend (bottom, wrapping, uses active bands only) ────────────────────
-  // Place legend below chart in the pb area — two rows if needed
-  const legendY = pt + ch + 18;
-  const swatchW = 8;
-  const itemSpacing = 38;
-  const maxPerRow = Math.floor(cw / itemSpacing);
+  // ── Legend ────────────────────────────────────────────────────────────────
+  const legendY    = pt + ch + 18;
+  const itemW      = 38;
+  const maxPerRow  = Math.max(1, Math.floor(cw / itemW));
 
   for (let i = 0; i < HISTORY_BANDS.length; i++) {
     const band  = HISTORY_BANDS[i];
     const color = HISTORY_BAND_COLORS[i];
     const col   = i % maxPerRow;
     const row   = Math.floor(i / maxPerRow);
-    const lx    = pl + col * itemSpacing;
+    const lx    = pl + col * itemW;
     const ly    = legendY + row * 11;
+    const hasData = byBand[band].length >= 2;
 
-    // Swatch
     svg.appendChild(makeSvgEl('rect', {
-      x: lx, y: ly - 5, width: swatchW, height: 4,
-      fill: color, rx: 1,
-      opacity: byBand[band].length >= 2 ? '1' : '0.35'
+      x: lx, y: ly - 5, width: 8, height: 4,
+      fill: color, rx: 1, opacity: hasData ? '1' : '0.3'
     }));
-    // Label
     const lbl = makeSvgEl('text', {
-      x: lx + swatchW + 2, y: ly - 1,
-      class: 'history-legend-text',
-      opacity: byBand[band].length >= 2 ? '1' : '0.35'
+      x: lx + 10, y: ly - 1,
+      class: 'history-legend-text', opacity: hasData ? '1' : '0.3'
     });
     lbl.textContent = band;
     svg.appendChild(lbl);
   }
 
-  // ── Note: collecting since / data range ──────────────────────────────────
+  // ── "Collecting since" note ───────────────────────────────────────────────
   if (note) {
     if (data.earliest && (now - data.earliest) < HISTORY_WINDOW_S - 600) {
-      const d = new Date(data.earliest * 1000);
+      const d  = new Date(data.earliest * 1000);
       const hh = String(d.getUTCHours()).padStart(2, '0');
       const mm = String(d.getUTCMinutes()).padStart(2, '0');
       note.textContent = `Collecting since ${hh}:${mm} UTC`;
@@ -2828,13 +2783,12 @@ function drawHistoryChart(svg, note, data) {
   }
 }
 
+// ── Auto-refresh aligned to 5-min clock boundary ─────────────────────────────
 function startHistoryRefresh() {
   stopHistoryRefresh();
   fetchAndDrawHistory({ force: true });
-  // Align next tick to the next 5-minute boundary
-  const now  = Date.now();
   const snap = 5 * 60 * 1000;
-  const next = snap - (now % snap);
+  const next = snap - (Date.now() % snap);
   historyRefreshTimer = setTimeout(() => {
     fetchAndDrawHistory({ force: true });
     historyRefreshTimer = setInterval(() => fetchAndDrawHistory({ force: true }), snap);
@@ -2842,41 +2796,46 @@ function startHistoryRefresh() {
 }
 
 function stopHistoryRefresh() {
-  if (historyRefreshTimer) {
+  if (historyRefreshTimer != null) {
     clearTimeout(historyRefreshTimer);
     clearInterval(historyRefreshTimer);
     historyRefreshTimer = null;
   }
 }
 
-// ── Wire up controls ──────────────────────────────────────────────────────────
+// ── Wire up vantage controls → chart refresh ──────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  const toSel = document.getElementById('history-to-select');
-  if (toSel) {
-    toSel.addEventListener('change', () => {
-      historyLastFetchKey = null; // force refresh
+  // Region mode select
+  document.getElementById('region-select')?.addEventListener('change', () => {
+    historyLastVantage = null;
+    fetchAndDrawHistory({ force: true });
+  });
+
+  // Grid input (on Enter or blur)
+  const gridInput = document.getElementById('grid-input');
+  if (gridInput) {
+    gridInput.addEventListener('change', () => {
+      historyLastVantage = null;
       fetchAndDrawHistory({ force: true });
     });
   }
 
-  // Re-fetch when vantage changes (region select or grid input)
-  const regionSel = document.getElementById('region-select');
-  if (regionSel) regionSel.addEventListener('change', () => {
-    historyLastFetchKey = null;
-    fetchAndDrawHistory({ force: true });
+  // Mode radio buttons (region ↔ grid switch)
+  document.querySelectorAll('input[name="vantage-mode"]').forEach(rb => {
+    rb.addEventListener('change', () => {
+      historyLastVantage = null;
+      fetchAndDrawHistory({ force: true });
+    });
   });
 
-  const gridInput = document.getElementById('grid-input');
-  if (gridInput) gridInput.addEventListener('change', () => {
-    historyLastFetchKey = null;
-    fetchAndDrawHistory({ force: true });
-  });
-
-  // Redraw on resize (SVG width changes)
-  let resizeDebounce = null;
+  // Redraw on window resize
+  let resizeTimer = null;
   window.addEventListener('resize', () => {
-    clearTimeout(resizeDebounce);
-    resizeDebounce = setTimeout(() => fetchAndDrawHistory({ force: true }), 200);
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      historyLastVantage = null; // force redraw with correct width
+      fetchAndDrawHistory({ force: true });
+    }, 200);
   });
 
   startHistoryRefresh();
