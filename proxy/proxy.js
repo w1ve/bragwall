@@ -1828,15 +1828,17 @@ async function streamAsyncTtsToFile(transcript, lang, outPath, httpRes = null) {
 
 function sendAudioFile(res, filePath, generated, lang) {
   fs.promises.stat(filePath).then((st) => {
+    const basename = path.basename(filePath);
     res.writeHead(200, {
       ...CORS,
       'Content-Type': 'audio/mpeg',
       'Content-Length': st.size,
       'Cache-Control': 'public, max-age=60',
       'X-HFSIGNALS-Audio': generated ? 'generated' : 'cached',
+      'X-HFSIGNALS-Filename': basename,
       'X-HFSIGNALS-Language': outputLanguage(lang),
       'X-HFSIGNALS-Tooltip': audioTooltipText(lang),
-      'Access-Control-Expose-Headers': 'X-HFSIGNALS-Audio, X-HFSIGNALS-Language, X-HFSIGNALS-Tooltip',
+      'Access-Control-Expose-Headers': 'X-HFSIGNALS-Audio, X-HFSIGNALS-Filename, X-HFSIGNALS-Language, X-HFSIGNALS-Tooltip',
     });
     fs.createReadStream(filePath).pipe(res);
   }).catch(() => {
@@ -1970,11 +1972,13 @@ async function serveAudioPropReport(req, res, query = {}) {
       'Transfer-Encoding': 'chunked',
       'Cache-Control': 'no-store',
       'X-HFSIGNALS-Audio': 'streaming',
+      'X-HFSIGNALS-Filename': fileName,
       'X-HFSIGNALS-Language': outputLanguage(params.lang),
       'X-HFSIGNALS-Tooltip': audioTooltipText(params.lang),
-      'Access-Control-Expose-Headers': 'X-HFSIGNALS-Audio, X-HFSIGNALS-Language, X-HFSIGNALS-Tooltip',
+      'Access-Control-Expose-Headers': 'X-HFSIGNALS-Audio, X-HFSIGNALS-Filename, X-HFSIGNALS-Language, X-HFSIGNALS-Tooltip',
     });
 
+    console.log('[audio] cache miss — streaming live TTS:', fileName);
     const dynamicPath = `${outPath}.dynamic-tmp`;
 
     // Stream TTS to client and file simultaneously

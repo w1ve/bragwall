@@ -2079,7 +2079,23 @@ async function requestAudioReport() {
   audioRequestInFlight = true;
   setAudioButtonState('loading');
   suppressAudioStopOnVantageUpdate = true;
-  setStatus('Loading audio propagation report...', 'warn');
+  setStatus('Requesting audio report...', 'warn');
+
+  // Fire a HEAD request in parallel to sniff cache status from headers.
+  // This resolves quickly (no body) and tells us streaming vs cache hit.
+  fetch(url, { method: 'HEAD' }).then((r) => {
+    if (!r.ok) return;
+    const audioMode = r.headers.get('X-HFSIGNALS-Audio') || '';
+    const filename  = r.headers.get('X-HFSIGNALS-Filename') || '';
+    const label     = filename ? ` (${filename})` : '';
+    if (audioMode === 'cached') {
+      console.log(`[audio] playing from cache${label}`);
+      setStatus(`Playing from cache${label}`, 'ok');
+    } else if (audioMode === 'streaming') {
+      console.log(`[audio] streaming live TTS${label}`);
+      setStatus(`Streaming audio report${label}`, 'warn');
+    }
+  }).catch(() => {});
 
   const audio = new Audio(url);
   audioElement = audio;
@@ -2089,7 +2105,7 @@ async function requestAudioReport() {
     if (audioRequestInFlight) {
       audioRequestInFlight = false;
       setAudioButtonState('playing');
-      setStatus('Playing audio propagation report.', 'ok');
+      // Status line already set by the HEAD response; only update if it hasn't been yet
     }
   }, { once: true });
 
