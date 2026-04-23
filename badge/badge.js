@@ -1327,7 +1327,7 @@ const server = http.createServer(async (req, res) => {
 
   // Cache hit?
   const now    = Date.now();
-  console.log(`[badge] req theme="${theme}" cacheKey="${cacheKey}"`);
+  console.log(`[badge] req theme="${theme}" cacheKey="${cacheKey}" rawQuery="${url.parse(req.url).query}"`);
   const cached = pngCache.get(cacheKey);
   if (cached && (now - cached.createdAt) < CACHE_TTL_MS) {
     sendPng(res, cached.png, now - cached.createdAt, false); return;
