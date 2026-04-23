@@ -452,14 +452,6 @@ function connectFeed() {
 connectFeed();
 
 // ── Hamqth backup ─────────────────────────────────────────────────────────────
-const HAMQTH_URL =
-  'https://www.hamqth.com/rbn_data.php' +
-  '?data=1&band=160,80,40,30,20,17,15,12,10,6' +
-  '&fromcont=AF,AN,AS,EU,NA,OC,SA' +
-  '&mode=CW,RTTY,FT8,PSK31,PSK63' +
-  '&cont=AF,AN,AS,EU,NA,OC,SA' +
-  '&waz=*&itu=*&age=3600&order=3';
-
 const HAMDB_BASE  = 'https://api.hamdb.org/v1/';
 const CALLSIGN_RE = /^[A-Z0-9/]{3,12}$/i;
 
@@ -2030,14 +2022,7 @@ async function serveRbn(res) {
     send(res, 200, 'application/json', buildRbnResponse());
     return;
   }
-  try {
-    const raw = await fetchRaw(HAMQTH_URL, 12000);
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.keys(parsed).length > 0) {
-      send(res, 200, 'application/json', raw);
-      return;
-    }
-  } catch (_) {}
+  // Feed not yet warmed up — return empty object; badge server shows warmup screen
   send(res, 200, 'application/json', '{}');
 }
 
