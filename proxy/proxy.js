@@ -39,6 +39,8 @@ const ASYNC_VOICE_NAME = (process.env.ASYNC_VOICE_NAME || 'tucker').trim();
 const ASYNC_VOICE_ID = (process.env.ASYNC_VOICE_ID || '').trim();
 const ASYNC_MP3_SAMPLE_RATE = parseInt(process.env.ASYNC_MP3_SAMPLE_RATE || '44100', 10);
 const ASYNC_MP3_BIT_RATE = parseInt(process.env.ASYNC_MP3_BIT_RATE || '128000', 10);
+const GOOGLE_TRANSLATE_API_BASE = process.env.GOOGLE_TRANSLATE_API_BASE || 'https://translation.googleapis.com/language/translate/v2';
+const GOOGLE_TRANSLATE_API_KEY = (process.env.GOOGLE_TRANSLATE_API_KEY || process.env.GCP_TRANSLATE_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
 
 const AUDIO_SUPPORTED_TTS_LANGS = new Set(['en', 'fr', 'es', 'de', 'it', 'pt', 'ar', 'ru', 'ro', 'ja', 'he', 'hy', 'tr', 'hi', 'zh']);
 
@@ -1781,17 +1783,34 @@ function requestText(method, targetUrl, bodyText, extraHeaders = {}, timeoutMs =
 async function translateTextIfNeeded(sourceText, lang) {
   const target = outputLanguage(lang);
   if (target === 'en') return sourceText;
+  if (!GOOGLE_TRANSLATE_API_KEY) {
+    console.warn(`[audio] GOOGLE_TRANSLATE_API_KEY missing for lang=${target} — falling back to English`);
+    return sourceText;
+  }
 
-  // Try up to 3 times — the free gtx endpoint can rate-limit or time out
+  // Try up to 3 times in case of transient upstream failures.
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const trUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(sourceText)}`;
-      const raw = await fetchRaw(trUrl, 12000, { 'User-Agent': 'hfsignals-audio/1.0' });
-      const parsed = JSON.parse(raw);
-      const text = Array.isArray(parsed?.[0]) ? parsed[0].map((row) => String(row?.[0] || '')).join('') : '';
-      if (text && text.trim()) {
+      const rsp = await requestText(
+        'POST',
+        `${GOOGLE_TRANSLATE_API_BASE}?key=${encodeURIComponent(GOOGLE_TRANSLATE_API_KEY)}`,
+        JSON.stringify({
+          q: sourceText,
+          source: 'en',
+          target,
+          format: 'text',
+        }),
+        { 'Content-Type': 'application/json' },
+        12000
+      );
+      if (rsp.statusCode !== 200) {
+        throw new Error(`translate_${rsp.statusCode}:${rsp.bodyText.slice(0, 240)}`);
+      }
+      const parsed = JSON.parse(rsp.bodyText);
+      const text = String(parsed?.data?.translations?.[0]?.translatedText || '').trim();
+      if (text) {
         console.log(`[audio] translated to ${target} (attempt ${attempt}, ${text.length} chars)`);
-        return text.trim();
+        return text;
       }
       console.warn(`[audio] translation attempt ${attempt} returned empty for lang=${target}`);
     } catch (e) {
@@ -1853,7 +1872,7 @@ async function resolveAsyncVoiceId() {
 async function streamAsyncTtsToFile(transcript, lang, outPath, httpRes = null) {
   if (!ASYNC_API_KEY) throw new Error('ASYNC_API_KEY not configured');
   const voiceId = await resolveAsyncVoiceId();
-  const ttsLang = outputLanguage(lang);
+  const detectedLang = outputLanguage(lang);
   const payload = {
     model_id: ASYNC_MODEL_ID,
     transcript,
@@ -1864,8 +1883,7 @@ async function streamAsyncTtsToFile(transcript, lang, outPath, httpRes = null) {
       bit_rate: Math.max(32000, Math.min(320000, ASYNC_MP3_BIT_RATE)),
     },
   };
-  if (ttsLang !== 'en') payload.language = ttsLang;
-  console.log(`[tts] lang=${ttsLang} voice=${voiceId} chars=${transcript.length} preview="${transcript.slice(0, 60).replace(/\n/g,' ')}..."`);
+  console.log(`[tts] detectedLang=${detectedLang} voice=${voiceId} chars=${transcript.length} preview="${transcript.slice(0, 60).replace(/\n/g,' ')}..."`);
 
   const targetUrl = `${ASYNC_API_BASE.replace(/\/+$/, '')}/text_to_speech/streaming`;
   const parsed = url.parse(targetUrl);
