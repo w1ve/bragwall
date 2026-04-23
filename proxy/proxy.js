@@ -438,6 +438,31 @@ let asyncVoiceLookupPromise = null;
 // waits for the first generation to finish then serves from cache — rather
 // than both generating concurrently and fighting over the output file.
 const audioGenerationInFlight = new Map();
+
+// Semaphore: caps concurrent TTS generations to async.com's concurrency limit.
+// Requests beyond the cap queue up and run as slots free — they still benefit
+// from the per-key dedup above (same key collapses into one generation).
+const ASYNC_MAX_CONCURRENT = parseInt(process.env.ASYNC_MAX_CONCURRENT || '5', 10);
+let audioSemaphoreActive = 0;
+const audioSemaphoreQueue = [];
+function audioSemaphoreAcquire() {
+  return new Promise((resolve) => {
+    if (audioSemaphoreActive < ASYNC_MAX_CONCURRENT) {
+      audioSemaphoreActive++;
+      resolve();
+    } else {
+      audioSemaphoreQueue.push(resolve);
+    }
+  });
+}
+function audioSemaphoreRelease() {
+  if (audioSemaphoreQueue.length > 0) {
+    const next = audioSemaphoreQueue.shift();
+    next(); // hand the slot directly to the next waiter (count stays the same)
+  } else {
+    audioSemaphoreActive--;
+  }
+}
 let audioCacheDirReady = false;
 
 function pruneSpots() {
@@ -2081,6 +2106,9 @@ async function serveAudioPropReport(req, res, query = {}) {
   const inFlightPromise = new Promise((res, rej) => { resolveInFlight = res; rejectInFlight = rej; });
   audioGenerationInFlight.set(outPath, inFlightPromise);
 
+  // Acquire a semaphore slot (max ASYNC_MAX_CONCURRENT concurrent TTS streams)
+  await audioSemaphoreAcquire();
+
   try {
     await deleteMatchingAudio(prefix);
 
@@ -2145,6 +2173,7 @@ async function serveAudioPropReport(req, res, query = {}) {
     }
   } finally {
     audioGenerationInFlight.delete(outPath);
+    audioSemaphoreRelease();
   }
 }
 
