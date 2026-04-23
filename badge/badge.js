@@ -176,10 +176,10 @@ const THEMES = {
     modeDimColor:     '#b5c6de',
     modeDimBorder:    '#6f85a8',
   },
-  // legacy alias
+  // cr is a legacy alias — keep it pointing at cb
   cr: null,
 };
-THEMES.cr = THEMES.cb;  // backward-compat alias
+THEMES.cr = THEMES.cb;
 
 // ── History chart band colors — matches app.js exactly ───────────────────────
 const HIST_BAND_COLORS = [
@@ -1408,7 +1408,7 @@ const server = http.createServer(async (req, res) => {
 function parseTheme(raw) {
   const s = (raw || '').toLowerCase().trim();
   if (s === 'light') return 'light';
-  if (s === 'cr' || s === 'cb') return 'cr';  // cb = public alias for cr
+  if (s === 'cb' || s === 'cr') return 'cb';  // cr = legacy alias for cb
   return 'dark';
 }
 
