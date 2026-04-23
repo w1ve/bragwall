@@ -143,24 +143,27 @@ h1 {
 }
 
 .api-docs-link {
-  font-family: 'Share Tech Mono', monospace;
-  font-size: 13px;
-  font-weight: bold;
-  color: var(--bg2);
+  font-family: 'Orbitron', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
   background: var(--accent2);
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  padding: 5px 13px;
+  border: 2px solid var(--accent);
+  border-radius: 5px;
+  padding: 8px 18px;
   text-decoration: none;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.10em;
   white-space: nowrap;
-  transition: background 0.15s, color 0.15s;
-  margin-bottom: 3px;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  margin-bottom: 2px;
+  box-shadow: 0 0 8px rgba(0,212,170,0.35);
+  display: inline-block;
 }
 
 .api-docs-link:hover {
   background: var(--accent);
-  color: var(--bg2);
+  color: var(--bg);
+  box-shadow: 0 0 14px rgba(0,212,170,0.60);
 }
 
 @media (max-width: 400px) {
