@@ -8,6 +8,121 @@ const fs    = require('fs');
 const path  = require('path');
 const crypto = require('crypto');
 
+// ── Utility: median ──────────────────────────────────────────────────────────
+function median(nums) {
+  if (!nums || nums.length === 0) return null;
+  const sorted = nums.slice().sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+// ── Utility: Maidenhead grid → lat/lon ───────────────────────────────────────
+function gridToLatLon(grid) {
+  if (!grid || grid.length < 4) return null;
+  const g = grid.toUpperCase();
+  const f1 = g.charCodeAt(0) - 65;
+  const f2 = g.charCodeAt(1) - 65;
+  const s1 = parseInt(g[2], 10);
+  const s2 = parseInt(g[3], 10);
+  if (f1 < 0 || f1 > 17 || f2 < 0 || f2 > 17 || Number.isNaN(s1) || Number.isNaN(s2)) return null;
+  let lon = f1 * 20 - 180 + s1 * 2 + 1;
+  let lat = f2 * 10 - 90 + s2 + 0.5;
+  if (g.length >= 6) {
+    const ss1 = g.charCodeAt(4) - 65;
+    const ss2 = g.charCodeAt(5) - 65;
+    if (ss1 >= 0 && ss1 < 24 && ss2 >= 0 && ss2 < 24) {
+      lon = f1 * 20 - 180 + s1 * 2 + ss1 * (2 / 24) + 1 / 24;
+      lat = f2 * 10 - 90 + s2 + ss2 * (1 / 24) + 0.5 / 24;
+    }
+  }
+  return { lat, lon };
+}
+
+// ── Utility: haversine distance in km ────────────────────────────────────────
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ── Utility: distanceMiles (used by regionFromLatLon) ────────────────────────
+function distanceMiles(lat1, lon1, lat2, lon2) {
+  return haversineKm(lat1, lon1, lat2, lon2) * 0.621371;
+}
+
+// ── Region/callsign utilities ────────────────────────────────────────────────
+function regionFromLatLon(lat, lon) {
+  const dCar = distanceMiles(lat, lon, CARIBBEAN_CENTER.lat, CARIBBEAN_CENTER.lon);
+  if (dCar <= CARIBBEAN_CENTER.radiusMiles && lat >= 8 && lat <= 30 && lon >= -92 && lon <= -56) return 'CAR';
+  if (lat > 15 && lon >= -170 && lon <= -50) {
+    if (lon >= -85)  return 'ENA';
+    if (lon >= -105) return 'CNA';
+    return 'WNA';
+  }
+  if (lat >= -60 && lat <= 15 && lon >= -82 && lon <= -34) return 'SA';
+  if (lat >= 35  && lat <= 72 && lon >= -12 && lon <= 45)  return 'EU';
+  if (lat >= -35 && lat <= 40 && lon >= -20 && lon <= 55)  return 'AF';
+  if (lat >= -10 && lat <= 75 && lon >= 45)                return 'AS';
+  if (lat <= 0   && lon >= 100)                            return 'OC';
+  return null;
+}
+
+function callsignCandidates(call) {
+  const raw = String(call || '').toUpperCase().trim();
+  if (!raw) return [];
+  const parts = raw.split('/').map((s) => s.replace(/[^A-Z0-9]/g, '')).filter(Boolean);
+  if (parts.length === 0) return [];
+  const preferred = [];
+  const appended  = [];
+  for (const p of parts) {
+    if (p === 'P' || p === 'QRP' || p === 'M' || p === 'MM' || p === 'AM') continue;
+    if (/[A-Z]/.test(p) && /\d/.test(p) && p.length >= 3) preferred.push(p);
+    else appended.push(p);
+  }
+  const seen = new Set();
+  const ordered = [];
+  for (const p of preferred.concat(appended)) {
+    if (!seen.has(p)) { seen.add(p); ordered.push(p); }
+  }
+  return ordered;
+}
+
+function regionFromUsCallsign(baseCall) {
+  const c = String(baseCall || '');
+  if (!/^(?:[WKN][0-9]|A[A-L][0-9])/.test(c)) return null;
+  for (const ch of c) {
+    if (ch < '0' || ch > '9') continue;
+    const d = parseInt(ch, 10);
+    if (d === 0 || d === 5 || d === 9) return 'CNA';
+    if (d === 6 || d === 7) return 'WNA';
+    return 'ENA';
+  }
+  return null;
+}
+
+function classifyCallsignRegion(call) {
+  const candidates = callsignCandidates(call);
+  for (const c of candidates) {
+    for (const [pfx, region] of CALLSIGN_REGION_PREFIXES) {
+      if (c.startsWith(pfx)) return region;
+    }
+    const usRegion = regionFromUsCallsign(c);
+    if (usRegion) return usRegion;
+  }
+  return null;
+}
+
+function bandForFrequencyKhz(freqKhz) {
+  for (const band of BANDS) {
+    if (freqKhz >= band.min && freqKhz <= band.max) return band.label;
+  }
+  return null;
+}
+
+
+
 const PORT = process.env.PORT || 3001;
 
 const SPOT_KEEP_MS  = 2 * 60 * 1000;
@@ -184,6 +299,9 @@ const HISTORY_KEEP_MS     = 24 * 60 * 60 * 1000;  // 24-hour retention
 let histDb     = null;
 let histInsert = null;
 
+// Last grid vantage seen from a client poll — {grid, rangeKm}
+let lastGridVantage = null;
+
 function initHistoryDb() {
   try {
     const dir = require('path').dirname(HISTORY_DB_PATH);
@@ -280,6 +398,53 @@ function snapshotHistory() {
       }
     }
 
+    // ── Grid vantage snapshot ──────────────────────────────────────
+    // Uses region-based approximation: classify grid center → region, then
+    // use same RBN+PSK data as the region snapshot for that region.
+    // This avoids async HamDB lookups during a background timer.
+    if (lastGridVantage) {
+      const { grid, rangeKm } = lastGridVantage;
+      const vkey = `GRID:${grid}:${rangeKm}`;
+      const gridLL = gridToLatLon(grid);
+      if (gridLL) {
+        const gridRegion = regionFromLatLon(gridLL.lat, gridLL.lon);
+        if (gridRegion) {
+          const gridBandSnr = {};
+          for (const b of BAND_LABELS) gridBandSnr[b] = [];
+
+          // RBN: spotters whose region matches the grid's region
+          for (const [, spot] of spotMap) {
+            if (spot.lastSeen < spotAgeCutoff) continue;
+            const band = bandForFrequencyKhz(spot.freq);
+            if (!band) continue;
+            for (const [spotter, snrVal] of Object.entries(spot.lsn || {})) {
+              if (classifyCallsignRegion(spotter) !== gridRegion) continue;
+              const snr = Number(snrVal);
+              if (Number.isFinite(snr)) gridBandSnr[band].push(snr);
+            }
+          }
+
+          // PSK: aggregate all toRegions from the grid's fromRegion
+          if (pskCacheData && pskCacheData[gridRegion]) {
+            for (const toData of Object.values(pskCacheData[gridRegion])) {
+              for (const [band, entry] of Object.entries(toData || {})) {
+                if (!BAND_LABELS.includes(band)) continue;
+                if (!entry || !Number.isFinite(entry.snr)) continue;
+                gridBandSnr[band].push(entry.snr);
+              }
+            }
+          }
+
+          for (const band of BAND_LABELS) {
+            const vals = gridBandSnr[band];
+            if (vals.length === 0) continue;
+            const snr = Math.max(0, Math.round(median(vals) * 10) / 10);
+            rows.push({ ts, vantage_key: vkey, band, snr });
+          }
+        }
+      }
+    }
+
     if (rows.length > 0) insertMany(rows);
     pruneHistory();
   } catch (e) {
@@ -296,7 +461,8 @@ function serveHistory(res, query) {
   }
 
   const vantage = (query.vantage || 'ENA').toUpperCase();
-  if (!REGION_KEY_SET.has(vantage)) {
+  // Accept both region keys (ENA) and grid keys (GRID:FN42:500)
+  if (!REGION_KEY_SET.has(vantage) && !vantage.startsWith('GRID:')) {
     sendJson(res, 400, { error: 'bad_vantage', valid: Array.from(REGION_KEY_SET) });
     return;
   }
@@ -576,6 +742,19 @@ const server = http.createServer(async (req, res) => {
       pskRetryIn: pskBlockedUntil > Date.now() ? Math.round((pskBlockedUntil - Date.now()) / 1000) : 0,
       pskModes: PSK_MODES,
     }));
+    return;
+  }
+  if (parts[0] === 'vantage') {
+    // PWA reports current vantage on every poll so grid history can be snapshotted
+    const q = parsed.query || {};
+    if (q.mode === 'grid' && q.grid && q.grid.length >= 4) {
+      const rangeKm = Math.max(50, Math.min(5000, parseInt(q.range || '500', 10)));
+      const grid    = q.grid.toUpperCase().slice(0, 6);
+      lastGridVantage = { grid, rangeKm };
+    } else {
+      lastGridVantage = null;
+    }
+    sendJson(res, 200, { ok: true });
     return;
   }
   if (parts[0] === 'history') {

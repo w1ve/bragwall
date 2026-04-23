@@ -1873,6 +1873,8 @@ async function pollOnce(revisionAtRequest = refreshRevision) {
       queueMicrotask(() => pollOnce());
     }
   }
+  // Inform proxy of current vantage so it can snapshot grid history
+  pingVantage();
 }
 
 function startPolling() {
