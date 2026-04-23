@@ -313,6 +313,17 @@ function emptyModeQuality() {
   return { CW: null, SSB: null, RTTY: null, FTx: null };
 }
 
+// Matches normaliseMode() in app.js — same logic, same output tokens
+function normaliseMode(raw) {
+  const u = (raw || '').toUpperCase();
+  if (u === 'CW')           return 'CW';
+  if (u === 'RTTY')         return 'RTTY';
+  if (u === 'FT8')          return 'FT8';
+  if (u === 'FT4')          return 'FT4';
+  if (u.startsWith('PSK'))  return 'PSK';
+  return u || null;
+}
+
 function qualityFractionForMode(metric, snr) {
   if (metric === 'SSB') return Math.min(snr / SSB_THRESHOLD, 1);
   return Math.min(snr / MAX_SNR, 1);
@@ -518,18 +529,23 @@ function computeRegionBand(data, fromKey, toKey, bandLabel) {
       const snr = Number(snrVal);
       if (!Number.isFinite(snr)) continue;
       snrs.push(snr); rbnCount++;
-      const m = (spot.mode || '').toUpperCase();
-      if (m.includes('CW'))   { modes.add('CW');   modeSnrs.CW.push(snr);   }
-      else if (m.includes('SSB')) { modes.add('SSB');  modeSnrs.SSB.push(snr);  }
-      else if (m.includes('RTTY')){ modes.add('RTTY'); modeSnrs.RTTY.push(snr); }
+      const nm = normaliseMode(spot.mode);
+      if (nm === 'CW')            { modes.add('CW');   modeSnrs.CW.push(snr);   }
+      else if (nm === 'RTTY')     { modes.add('RTTY'); modeSnrs.RTTY.push(snr); }
+      else if (nm === 'FT8' || nm === 'FT4') { modes.add('FT8'); modeSnrs.FTx.push(snr); }
+      // SSB not on RBN; PSK folded into FTx for display
+      else if (nm === 'PSK')      { modes.add('FT8'); modeSnrs.FTx.push(snr); }
     }
   }
 
   const med = median(snrs);
-  ['CW','SSB','RTTY'].forEach(k => {
+  ['CW','RTTY'].forEach(k => {
     const v = median(modeSnrs[k]);
     if (Number.isFinite(v)) modeQuality[k] = v;
   });
+  // FTx SNR from RBN digital spots (will be overwritten by PSKReporter if available)
+  const ftxV = median(modeSnrs.FTx);
+  if (Number.isFinite(ftxV)) modeQuality.FTx = ftxV;
 
   return {
     snr: Number.isFinite(med) ? Math.max(0, med) : 0,
@@ -548,7 +564,7 @@ function computeGridBand(data, grid, radiusMiles, toKey, bandLabel) {
   const spots = data?.spots || [];
   const snrs  = [], modes = new Set();
   const modeQuality = emptyModeQuality();
-  const modeSnrs    = { CW: [], SSB: [], RTTY: [] };
+  const modeSnrs    = { CW: [], SSB: [], RTTY: [], FTx: [] };
   let rbnCount = 0;
 
   for (const spot of spots) {
@@ -561,18 +577,21 @@ function computeGridBand(data, grid, radiusMiles, toKey, bandLabel) {
       const snr = Number(snrVal);
       if (!Number.isFinite(snr)) continue;
       snrs.push(snr); rbnCount++;
-      const m = (spot.mode || '').toUpperCase();
-      if (m.includes('CW'))    { modes.add('CW');   modeSnrs.CW.push(snr);   }
-      else if (m.includes('SSB'))  { modes.add('SSB');  modeSnrs.SSB.push(snr);  }
-      else if (m.includes('RTTY')) { modes.add('RTTY'); modeSnrs.RTTY.push(snr); }
+      const nm = normaliseMode(spot.mode);
+      if (nm === 'CW')            { modes.add('CW');   modeSnrs.CW.push(snr);   }
+      else if (nm === 'RTTY')     { modes.add('RTTY'); modeSnrs.RTTY.push(snr); }
+      else if (nm === 'FT8' || nm === 'FT4') { modes.add('FT8'); modeSnrs.FTx.push(snr); }
+      else if (nm === 'PSK')      { modes.add('FT8'); modeSnrs.FTx.push(snr); }
     }
   }
 
   const med = median(snrs);
-  ['CW','SSB','RTTY'].forEach(k => {
+  ['CW','RTTY'].forEach(k => {
     const v = median(modeSnrs[k]);
     if (Number.isFinite(v)) modeQuality[k] = v;
   });
+  const ftxVg = median(modeSnrs.FTx);
+  if (Number.isFinite(ftxVg)) modeQuality.FTx = ftxVg;
   return {
     snr: Number.isFinite(med) ? Math.max(0, med) : 0,
     hasData: Number.isFinite(med),
@@ -638,18 +657,18 @@ function drawBandRow(ctx, y, bandLabel, result, t) {
 
     // Mode pills — rendered inside the bar, right-aligned
     // Each pill: 2-char label (CW, FT, RT) in a small rounded rect
+    // Same display slots as main UI: CW / SSB / RY / DIG
     const PILL_SLOTS = [
-      { key: 'CW',   label: 'CW' },
-      { key: 'FTx',  label: 'FT' },
-      { key: 'RTTY', label: 'RT' },
+      { key: 'CW',   label: 'CW',  test: m => m.has('CW')   },
+      { key: 'SSB',  label: 'SSB', test: m => m.has('SSB')  },
+      { key: 'RTTY', label: 'RY',  test: m => m.has('RTTY') },
+      { key: 'FTx',  label: 'DIG', test: m => m.has('FT8')  },
     ];
-    const pillH  = RM_BAR_H - 2;   // 1px margin top/bottom
+    const pillH  = RM_BAR_H - 2;
     const pillW  = 14;
     const pillGap = 2;
-    const activeModes = PILL_SLOTS.filter(p =>
-      p.key === 'FTx' ? (modes instanceof Set ? modes.has('FT8') : false)
-                      : (modes instanceof Set ? modes.has(p.key) : false)
-    );
+    const modeSet = (modes instanceof Set) ? modes : new Set();
+    const activeModes = PILL_SLOTS.filter(p => p.test(modeSet));
     if (activeModes.length > 0) {
       let px = barX + barW - 1;  // start from right edge of bar
       for (let pi = activeModes.length - 1; pi >= 0; pi--) {
