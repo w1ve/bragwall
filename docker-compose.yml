@@ -6,6 +6,8 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    expose:
+      - "3001"
     environment:
       - DOMAIN=${DOMAIN}
       - EMAIL=${EMAIL}
@@ -34,9 +36,9 @@ services:
       - "3002"
     environment:
       - PORT=3002
-      - RBN_PROXY_URL=http://rbn-smeter:80/rbn
-      - PSK_PROXY_URL=http://rbn-smeter:80/psk
-      - HIST_PROXY_URL=http://rbn-smeter:80/history
+      - RBN_PROXY_URL=http://rbn-smeter:3001/rbn
+      - PSK_PROXY_URL=http://rbn-smeter:3001/psk
+      - HIST_PROXY_URL=http://rbn-smeter:3001/history
     networks:
       - rbn-net
 
