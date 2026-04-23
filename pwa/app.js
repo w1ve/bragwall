@@ -1867,8 +1867,6 @@ async function pollOnce(revisionAtRequest = refreshRevision) {
     spotsProcessed > 0 ? 'ok' : 'warn'
   );
   } finally {
-    // Inform proxy of current vantage so it can snapshot grid history
-    pingVantage();
     pollInFlight = false;
     if (pollPending) {
       pollPending = false;
