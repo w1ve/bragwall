@@ -2081,9 +2081,12 @@ async function requestAudioReport() {
   suppressAudioStopOnVantageUpdate = true;
   setStatus('Requesting audio report...', 'warn');
 
-  // Fire a HEAD request in parallel to sniff cache status from headers.
-  // This resolves quickly (no body) and tells us streaming vs cache hit.
-  fetch(url, { method: 'HEAD' }).then((r) => {
+  // Fire a GET fetch to sniff response headers, then immediately abort the body.
+  // (The proxy only accepts GET — HEAD returns 405.)
+  // Headers arrive before the body so we get cache status with minimal overhead.
+  const headerProbe = new AbortController();
+  fetch(url, { signal: headerProbe.signal }).then((r) => {
+    headerProbe.abort(); // drop the body immediately — <audio> is already playing it
     if (!r.ok) return;
     const audioMode = r.headers.get('X-HFSIGNALS-Audio') || '';
     const filename  = r.headers.get('X-HFSIGNALS-Filename') || '';
@@ -2095,7 +2098,7 @@ async function requestAudioReport() {
       console.log(`[audio] streaming live TTS${label}`);
       setStatus(`Streaming audio report${label}`, 'warn');
     }
-  }).catch(() => {});
+  }).catch(() => {}); // AbortError is expected and ignored
 
   const audio = new Audio(url);
   audioElement = audio;
