@@ -99,8 +99,9 @@ header {
 
 .header-inner {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
+  gap: 16px;
 }
 
 h1 {
@@ -139,31 +140,30 @@ h1 {
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
-  margin-left: auto;
 }
 
 .api-docs-link {
   font-family: 'Orbitron', monospace;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   color: #ffffff;
   background: var(--accent2);
   border: 2px solid var(--accent);
   border-radius: 5px;
-  padding: 8px 18px;
+  padding: 10px 22px;
   text-decoration: none;
   letter-spacing: 0.10em;
   white-space: nowrap;
   transition: background 0.15s, color 0.15s, box-shadow 0.15s;
-  margin-bottom: 2px;
-  box-shadow: 0 0 8px rgba(0,212,170,0.35);
+  box-shadow: 0 0 10px rgba(0,212,170,0.40);
   display: inline-block;
+  flex-shrink: 0;
 }
 
 .api-docs-link:hover {
   background: var(--accent);
   color: var(--bg);
-  box-shadow: 0 0 14px rgba(0,212,170,0.60);
+  box-shadow: 0 0 18px rgba(0,212,170,0.70);
 }
 
 @media (max-width: 400px) {
