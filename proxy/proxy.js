@@ -1781,13 +1781,26 @@ function requestText(method, targetUrl, bodyText, extraHeaders = {}, timeoutMs =
 async function translateTextIfNeeded(sourceText, lang) {
   const target = outputLanguage(lang);
   if (target === 'en') return sourceText;
-  try {
-    const trUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(sourceText)}`;
-    const raw = await fetchRaw(trUrl, 12000, { 'User-Agent': 'hfsignals-audio/1.0' });
-    const parsed = JSON.parse(raw);
-    const text = Array.isArray(parsed?.[0]) ? parsed[0].map((row) => String(row?.[0] || '')).join('') : '';
-    if (text && text.trim()) return text.trim();
-  } catch {}
+
+  // Try up to 3 times — the free gtx endpoint can rate-limit or time out
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const trUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(sourceText)}`;
+      const raw = await fetchRaw(trUrl, 12000, { 'User-Agent': 'hfsignals-audio/1.0' });
+      const parsed = JSON.parse(raw);
+      const text = Array.isArray(parsed?.[0]) ? parsed[0].map((row) => String(row?.[0] || '')).join('') : '';
+      if (text && text.trim()) {
+        console.log(`[audio] translated to ${target} (attempt ${attempt}, ${text.length} chars)`);
+        return text.trim();
+      }
+      console.warn(`[audio] translation attempt ${attempt} returned empty for lang=${target}`);
+    } catch (e) {
+      console.warn(`[audio] translation attempt ${attempt} failed for lang=${target}:`, e?.message);
+    }
+    if (attempt < 3) await new Promise(r => setTimeout(r, 500 * attempt));
+  }
+
+  console.error(`[audio] all translation attempts failed for lang=${target} — falling back to English`);
   return sourceText;
 }
 
@@ -1852,6 +1865,7 @@ async function streamAsyncTtsToFile(transcript, lang, outPath, httpRes = null) {
     },
   };
   if (ttsLang !== 'en') payload.language = ttsLang;
+  console.log(`[tts] lang=${ttsLang} voice=${voiceId} chars=${transcript.length} preview="${transcript.slice(0, 60).replace(/\n/g,' ')}..."`);
 
   const targetUrl = `${ASYNC_API_BASE.replace(/\/+$/, '')}/text_to_speech/streaming`;
   const parsed = url.parse(targetUrl);
