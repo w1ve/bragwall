@@ -134,6 +134,35 @@ h1 {
   white-space: nowrap;
 }
 
+.header-right-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.api-docs-link {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 13px;
+  font-weight: bold;
+  color: var(--bg2);
+  background: var(--accent2);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 5px 13px;
+  text-decoration: none;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+  margin-bottom: 3px;
+}
+
+.api-docs-link:hover {
+  background: var(--accent);
+  color: var(--bg2);
+}
+
 @media (max-width: 400px) {
   .byline     { font-size: 8px; }
   .byline-tnx { font-size: 7px; }
