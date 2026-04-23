@@ -47,7 +47,7 @@ const CC_LANG = {
   FR:'fr', BE:'fr', LU:'fr', CH:'de', MC:'fr',
   ES:'es', MX:'es', AR:'es', CO:'es', CL:'es', PE:'es', VE:'es', EC:'es',
   BO:'es', PY:'es', UY:'es', CR:'es', PA:'es', GT:'es', HN:'es', SV:'es',
-  NI:'es', DO:'es', CU:'es',
+  NI:'es', DO:'es', CU:'es', PR:'es', GQ:'es',
   DE:'de', AT:'de',
   IT:'it', SM:'it', VA:'it',
   PT:'pt', BR:'pt', AO:'pt', MZ:'pt',
