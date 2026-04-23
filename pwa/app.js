@@ -2703,7 +2703,7 @@ function drawHistoryChart(svg, note, data) {
     const hh = String(d.getUTCHours()).padStart(2, '0');
     const mm = String(d.getUTCMinutes()).padStart(2, '0');
     const lbl = makeSvgEl('text', {
-      x, y: pt + ch + 11, 'text-anchor': 'middle', class: 'history-tick-label'
+      x, y: pt + ch + 13, 'text-anchor': 'middle', class: 'history-tick-label'
     });
     lbl.textContent = `${hh}:${mm}`;
     svg.appendChild(lbl);

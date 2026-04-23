@@ -1229,7 +1229,7 @@ body::after {
 
 .history-title {
   font-family: 'Orbitron', monospace;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.07em;
   color: var(--accent);
   white-space: nowrap;
@@ -1245,8 +1245,9 @@ body::after {
 }
 
 .history-note {
-  font-size: 10px;
-  color: var(--text-dim);
+  font-size: 11px;
+  color: var(--text);
+  opacity: 0.75;
   text-align: center;
   margin-top: 3px;
   min-height: 13px;
@@ -1254,10 +1255,10 @@ body::after {
 }
 
 /* Chart element styles (applied via SVG attributes but theme-aware via CSS vars) */
-.history-axis-line  { stroke: var(--text-dim); stroke-width: 1; }
-.history-tick-label { fill: var(--text-dim); font-size: 9px; font-family: 'Share Tech Mono', monospace; }
-.history-grid-line  { stroke: var(--text-dim); stroke-width: 0.5; stroke-dasharray: 2 4; opacity: 0.4; }
-.history-legend-text { fill: var(--text); font-size: 9px; font-family: 'Share Tech Mono', monospace; }
+.history-axis-line  { stroke: var(--text); stroke-width: 1; opacity: 0.5; }
+.history-tick-label { fill: var(--text); font-size: 11px; font-family: 'Share Tech Mono', monospace; opacity: 0.85; }
+.history-grid-line  { stroke: var(--text); stroke-width: 0.5; stroke-dasharray: 2 4; opacity: 0.2; }
+.history-legend-text { fill: var(--text); font-size: 11px; font-family: 'Share Tech Mono', monospace; }
 
 /* Vantage display: force column layout so chart sits below audio button */
 .vantage-display {
