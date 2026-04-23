@@ -209,8 +209,8 @@ const HIST_WINDOW_S   = 24 * 60 * 60;
 const RM_W      = 168;
 const RM_HDR    = 46;
 const RM_SIG_H  = 18;  // signal bar sub-row
-const RM_MODE_H = 13;  // mode strip sub-row
-const RM_ROW    = RM_SIG_H + RM_MODE_H + 1; // 1px separator = 32px
+const RM_MODE_H = 17;  // mode strip sub-row
+const RM_ROW    = RM_SIG_H + RM_MODE_H + 1; // 1px separator = 36px
 const RM_FTR    = 20;
 const RM_BRD    = 22;
 const RM_PAD    = 5;
@@ -690,13 +690,13 @@ function drawMiniSmeter(ctx, x, y, w, h, qKey, snrVal, t) {
   const gap  = 1;
   const segW = Math.max(1, Math.floor((w - gap * (SEGS - 1)) / SEGS));
   const frac = qualityFrac(qKey, snrVal);
-  // Background track
-  ctx.fillStyle = t.dimSeg;
+  // Track background — semi-transparent dark overlay so it's visible on any chip color
+  ctx.fillStyle = 'rgba(0,0,0,0.40)';
   ctx.fillRect(x, y, w, h);
   for (let i = 0; i < SEGS; i++) {
-    const sx     = x + i * (segW + gap);
-    const start  = i / SEGS;
-    const end    = (i + 1) / SEGS;
+    const sx    = x + i * (segW + gap);
+    const start = i / SEGS;
+    const end   = (i + 1) / SEGS;
     let fill = 0;
     if (frac > 0) {
       if (frac >= end) fill = 1;
@@ -704,7 +704,7 @@ function drawMiniSmeter(ctx, x, y, w, h, qKey, snrVal, t) {
     }
     if (fill > 0) {
       ctx.fillStyle = qualityColor(frac, t);
-      ctx.fillRect(sx, y, Math.round(segW * fill), h);
+      ctx.fillRect(sx, y, Math.max(1, Math.round(segW * fill)), h);
     }
   }
 }
@@ -761,27 +761,37 @@ function drawBandRow(ctx, y, bandLabel, result, t) {
   ctx.beginPath(); ctx.moveTo(0, sepY); ctx.lineTo(W, sepY); ctx.stroke();
 
   // ── Sub-row 2: Mode strip (RM_MODE_H px) ─────────────────────────────────
-  const modeY  = sepY + 1;          // 1px gap after separator
-  const modeH  = RM_MODE_H - 1;     // usable height
+  const modeY  = sepY + 1;
   const nSlots = DISPLAY_MODE_SLOTS.length;   // 4
 
-  // Fixed chip widths per label: "CW"=22, "SSB"=26, "RY"=22, "DIG"=26
-  // Gap = 3px between chips; row is left-aligned starting at RM_PAD
-  const CHIP_WIDTHS = [22, 26, 22, 26];
+  // Fixed chip widths: CW=24, SSB=28, RY=24, DIG=28 — sized to fit text with padding
+  const CHIP_WIDTHS = [24, 28, 24, 28];
   const CHIP_GAP    = 3;
-  const chipH   = modeH - 2;        // 1px top+bottom margin
-  const chipY   = modeY + 1;
+  const totalChipsW = CHIP_WIDTHS.reduce((a, w) => a + w, 0) + CHIP_GAP * (nSlots - 1);
+  // Center the chip row within the badge width
+  const chipsStartX = Math.floor((W - totalChipsW) / 2);
+
+  // chipH fills the mode sub-row with 1px margin top and bottom
+  const chipH = RM_MODE_H - 2;
+  const chipY = modeY + 1;
+
+  // Quality track height — top 3px of chip interior (inside the 1px border)
+  const METER_H = 3;
 
   for (let si = 0; si < nSlots; si++) {
     const slot   = DISPLAY_MODE_SLOTS[si];
     const isSSB  = slot.label === 'SSB';
     const active = slot.test(modeSet) && hasData;
     const chipW  = CHIP_WIDTHS[si];
-    const chipX  = RM_PAD + CHIP_WIDTHS.slice(0, si).reduce((a, w) => a + w + CHIP_GAP, 0);
+    const chipX  = chipsStartX + CHIP_WIDTHS.slice(0, si).reduce((a, w) => a + w + CHIP_GAP, 0);
     const qSnr   = modeQuality?.[slot.qKey] ?? null;
 
+    // Interior bounds (inside 1px border)
+    const innerX = chipX + 1;
+    const innerW = chipW - 2;
+
     if (active) {
-      // ── Active chip — matches .mode-active / .mode-ssb in style.css ────
+      // ── Active chip — .mode-active / .mode-ssb ──────────────────────────
       const bgColor     = isSSB ? t.modeSsbBg     : t.modeActiveBg;
       const borderColor = isSSB ? t.modeSsbBorder  : t.modeActiveBorder;
       ctx.fillStyle = bgColor;
@@ -790,37 +800,36 @@ function drawBandRow(ctx, y, bandLabel, result, t) {
       ctx.lineWidth   = 1;
       ctx.strokeRect(chipX + 0.5, chipY + 0.5, chipW - 1, chipH - 1);
 
-      // Mini quality-track strip — top 3px of chip (matches .mode-quality-track top:1px)
-      const meterH = 3;
-      const meterY = chipY + 1;
-      const meterX = chipX + 1;
-      const meterW = chipW - 2;
-      drawMiniSmeter(ctx, meterX, meterY, meterW, meterH, slot.qKey, qSnr, t);
+      // Quality track — sits at the TOP of the chip interior (top:1px in CSS)
+      drawMiniSmeter(ctx, innerX, chipY + 1, innerW, METER_H, slot.qKey, qSnr, t);
 
-      // Label — white, not bold, centered below the quality track
+      // Label — white, vertically centered in the space BELOW the meter track
+      const labelAreaTop = chipY + 1 + METER_H + 1;          // 1px gap after track
+      const labelAreaH   = chipH - 1 - METER_H - 1 - 1;      // remaining height above bottom border
       ctx.fillStyle    = '#ffffff';
-      ctx.font         = `9px "DejaVu Sans Mono"`;
+      ctx.font         = `bold 8px "DejaVu Sans Mono"`;
       ctx.textAlign    = 'center';
       ctx.textBaseline = 'middle';
-      const textY = chipY + meterH + 1 + (chipH - meterH - 1) / 2;
-      ctx.fillText(slot.label, chipX + chipW / 2, textY);
+      ctx.fillText(slot.label, chipX + chipW / 2, labelAreaTop + labelAreaH / 2);
+
     } else if (!hasData) {
       // ── No data — .mode-dim ─────────────────────────────────────────────
       ctx.strokeStyle = t.modeDimBorder;
       ctx.lineWidth   = 0.75;
       ctx.strokeRect(chipX + 0.5, chipY + 0.5, chipW - 1, chipH - 1);
       ctx.fillStyle    = t.modeDimColor;
-      ctx.font         = `9px "DejaVu Sans Mono"`;
+      ctx.font         = `8px "DejaVu Sans Mono"`;
       ctx.textAlign    = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(slot.label, chipX + chipW / 2, chipY + chipH / 2);
+
     } else {
-      // ── Absent (has data but mode not heard) — .mode-absent ─────────────
+      // ── Absent — .mode-absent ────────────────────────────────────────────
       ctx.strokeStyle = t.modeAbsentBorder;
       ctx.lineWidth   = 0.75;
       ctx.strokeRect(chipX + 0.5, chipY + 0.5, chipW - 1, chipH - 1);
       ctx.fillStyle    = t.modeAbsentColor;
-      ctx.font         = `9px "DejaVu Sans Mono"`;
+      ctx.font         = `8px "DejaVu Sans Mono"`;
       ctx.textAlign    = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(slot.label, chipX + chipW / 2, chipY + chipH / 2);
