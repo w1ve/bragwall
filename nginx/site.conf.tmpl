@@ -120,6 +120,15 @@ server {
         add_header Access-Control-Allow-Origin "*";
     }
 
+    location /historymap {
+        proxy_pass         http://rbn-badge:3002/historymap;
+        proxy_http_version 1.1;
+        proxy_read_timeout 15s;
+        proxy_connect_timeout 5s;
+        add_header Cache-Control "public, max-age=60";
+        add_header Access-Control-Allow-Origin "*";
+    }
+
     # ── Service worker + app shell — never HTTP-cached ──────────────────────
     location ~* ^/(sw\.js|app\.js|style\.css|index\.html|manifest\.json)$ {
         add_header Cache-Control "no-cache, no-store, must-revalidate";
