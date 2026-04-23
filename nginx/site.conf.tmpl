@@ -62,8 +62,15 @@ server {
     location /audio/ {
         proxy_pass         http://127.0.0.1:3001/audio/;
         proxy_http_version 1.1;
-        proxy_read_timeout 60s;
+        proxy_read_timeout 90s;
         proxy_connect_timeout 5s;
+        # Pass custom headers from upstream through to the browser
+        proxy_pass_header  X-HFSIGNALS-Audio;
+        proxy_pass_header  X-HFSIGNALS-Filename;
+        proxy_pass_header  X-HFSIGNALS-Language;
+        proxy_pass_header  X-HFSIGNALS-Tooltip;
+        # Required for chunked streaming — disable buffering so audio flows immediately
+        proxy_buffering    off;
     }
 
     location /health {

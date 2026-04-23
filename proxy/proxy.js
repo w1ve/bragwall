@@ -1795,11 +1795,13 @@ async function streamAsyncTtsToFile(transcript, lang, outPath, httpRes = null) {
           });
           return;
         }
-        // Tee: forward each chunk to the HTTP client immediately while writing to file
+        // Tee: forward each chunk to the HTTP client immediately while writing to file.
+        // If the client disconnects mid-stream we swallow the write error and keep
+        // writing to the file so the cache is still populated for the next request.
         upstream.on('data', (chunk) => {
           fileStream.write(chunk);
           if (httpRes && !httpRes.writableEnded) {
-            httpRes.write(chunk);
+            try { httpRes.write(chunk); } catch (_) { /* client disconnected — continue caching */ }
           }
         });
         upstream.on('end', () => { fileStream.end(); });
