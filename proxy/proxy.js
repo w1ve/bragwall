@@ -42,6 +42,48 @@ const ASYNC_MP3_BIT_RATE = parseInt(process.env.ASYNC_MP3_BIT_RATE || '128000', 
 
 const AUDIO_SUPPORTED_TTS_LANGS = new Set(['en', 'fr', 'es', 'de', 'it', 'pt', 'ar', 'ru', 'ro', 'ja', 'he', 'hy', 'tr', 'hi', 'zh']);
 
+// Map ISO 3166-1 alpha-2 country codes to primary spoken language
+const CC_LANG = {
+  FR:'fr', BE:'fr', LU:'fr', CH:'de', MC:'fr',
+  ES:'es', MX:'es', AR:'es', CO:'es', CL:'es', PE:'es', VE:'es', EC:'es',
+  BO:'es', PY:'es', UY:'es', CR:'es', PA:'es', GT:'es', HN:'es', SV:'es',
+  NI:'es', DO:'es', CU:'es',
+  DE:'de', AT:'de',
+  IT:'it', SM:'it', VA:'it',
+  PT:'pt', BR:'pt', AO:'pt', MZ:'pt',
+  RU:'ru', BY:'ru',
+  JP:'ja',
+  CN:'zh', TW:'zh', HK:'zh', MO:'zh',
+  SA:'ar', EG:'ar', AE:'ar', JO:'ar', LB:'ar', SY:'ar', IQ:'ar', KW:'ar',
+  QA:'ar', BH:'ar', OM:'ar', YE:'ar', LY:'ar', TN:'ar', DZ:'ar', MA:'ar', SD:'ar',
+  IL:'he',
+  TR:'tr',
+  RO:'ro',
+  IN:'hi',
+  AM:'hy',
+};
+
+/**
+ * Resolve the audio language to use given IP country and browser Accept-Language.
+ * Logic:
+ *   1. If the explicit ?lang= param is set, trust it (handled upstream).
+ *   2. Derive ipLang from the client's IP country code via CC_LANG.
+ *   3. Derive browserLang from the first entry of Accept-Language header.
+ *   4. If browserLang is a supported TTS language AND differs from ipLang → use browserLang.
+ *      (User has deliberately set their browser to a language that doesn't match their IP.)
+ *   5. Otherwise use ipLang.  Fall back to 'en' if neither resolves.
+ */
+function resolveAudioLang(countryCode, acceptLanguageHeader) {
+  const ipLang   = CC_LANG[String(countryCode || '').toUpperCase()] || null;
+  const rawBrowser = String(acceptLanguageHeader || '').split(',')[0].trim();
+  const browserLang = rawBrowser ? normalizeLanguageCode(rawBrowser) : null;
+  const browserSupported = browserLang && AUDIO_SUPPORTED_TTS_LANGS.has(browserLang);
+  // If browser lang is supported AND explicitly different from IP lang → trust browser
+  if (browserSupported && browserLang !== ipLang) return browserLang;
+  // Otherwise IP wins (or fall back to en)
+  return ipLang || 'en';
+}
+
 const spotMap = new Map();
 const REGION_KEYS = ['ENA', 'CNA', 'WNA', 'SA', 'EU', 'AF', 'AS', 'OC', 'CAR'];
 const CARIBBEAN_CENTER = { lat: 17.0, lon: -72.0, radiusMiles: 950 };
@@ -1114,7 +1156,7 @@ function bandResultTemplate() {
   };
 }
 
-async function parseAudioQuery(query = {}, headers = {}, clientIp = null) {
+async function parseAudioQuery(query = {}, headers = {}, clientIp = null, acceptLanguage = '') {
   const modeFromQuery = String(query.mode || '').trim().toLowerCase();
   const mode = modeFromQuery === 'grid' ? 'grid' : 'region';
   const grid = sanitizeGrid(query.grid || query.sourceGrid || '');
@@ -1131,16 +1173,23 @@ async function parseAudioQuery(query = {}, headers = {}, clientIp = null) {
   const radiusMiles = unit === 'km' ? radius * 0.621371 : radius;
   const toRegions = parseToRegions(query.to || query.destination || 'all');
   const bands = parseBandSelection(query.band, query.bands);
-  const lang = 'en'; // Always English — never inherit browser accept-language
   const utc = String(query.utc || utcTimeLabel()).trim();
 
-  // IP geo-detect country & local time for accurate greeting
+  // IP geo-detect country & local time; also derive language from country
   let localHour = null;
+  let countryCode = null;
   const ip = clientIp || (headers['x-forwarded-for'] || '').split(',')[0].trim() || null;
   if (ip) {
     const geoInfo = await countryFromIp(ip);
-    if (geoInfo && geoInfo.timezone) localHour = localHourFromTimezone(geoInfo.timezone);
+    if (geoInfo) {
+      if (geoInfo.timezone) localHour = localHourFromTimezone(geoInfo.timezone);
+      if (geoInfo.countryCode) countryCode = geoInfo.countryCode;
+    }
   }
+  // If caller explicitly passes ?lang=, honour it; otherwise auto-detect.
+  const lang = (query.lang && AUDIO_SUPPORTED_TTS_LANGS.has(normalizeLanguageCode(query.lang)))
+    ? normalizeLanguageCode(query.lang)
+    : resolveAudioLang(countryCode, acceptLanguage || headers['accept-language'] || '');
   const timeOfDay = pickTimeOfDay(query.timeOfDay || query.tod, utc, localHour);
 
   const ssb = parseBoolean(query.ssb || query.includeSsb || query.ssbChecked);
@@ -1927,7 +1976,7 @@ async function serveAudioPropReport(req, res, query = {}) {
   }
   const clientIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
     || req.socket?.remoteAddress || null;
-  const params = await parseAudioQuery(query, req.headers || {}, clientIp);
+  const params = await parseAudioQuery(query, req.headers || {}, clientIp, req.headers['accept-language'] || '');
   if (params.mode === 'grid' && !params.grid) {
     sendJson(res, 400, { error: 'invalid_grid', message: 'grid mode requires valid 4-char grid parameter' });
     return;
@@ -2127,11 +2176,7 @@ const server = http.createServer(async (req, res) => {
         const geoInfo = await countryFromIp(clientIp);
         if (geoInfo && geoInfo.countryCode) {
           // Map country code to language (best-effort)
-          const CC_LANG = { FR:'fr', ES:'es', MX:'es', AR:'es', CO:'es', CL:'es', PE:'es',
-            DE:'de', AT:'de', CH:'de', IT:'it', PT:'pt', BR:'pt', RU:'ru', JP:'ja',
-            CN:'zh', TW:'zh', HK:'zh', SA:'ar', EG:'ar', IL:'he', TR:'tr', RO:'ro',
-            IN:'hi', HY:'hy', AM:'hy' };
-          resolvedLang = CC_LANG[geoInfo.countryCode] || lang;
+          resolvedLang = resolveAudioLang(geoInfo.countryCode, req.headers['accept-language'] || '');
         }
       } catch {}
     }
