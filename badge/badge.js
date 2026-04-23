@@ -167,7 +167,7 @@ const HIST_WINDOW_S   = 24 * 60 * 60;
 //   branding bar: 22px
 //   total: 330px
 const RM_W    = 168;
-const RM_HDR  = 28;
+const RM_HDR  = 46;
 const RM_ROW  = 26;
 const RM_FTR  = 20;
 const RM_BRD  = 22;
@@ -621,7 +621,7 @@ function hexToRgb(hex) {
 // ── Render region-meter badge ─────────────────────────────────────────────────
 function renderRegionMeter(params) {
   const {
-    allResults, fromLabel, toLabel, theme, dataAge, rbnCount, ftxCount,
+    allResults, fromLabel, toLabel, vantageDesc, theme, dataAge, rbnCount, ftxCount,
   } = params;
   const t      = THEMES[theme] || THEMES.dark;
   const canvas = createCanvas(RM_W, RM_H);
@@ -631,7 +631,7 @@ function renderRegionMeter(params) {
   ctx.fillStyle = t.bg2;
   ctx.fillRect(0, 0, RM_W, RM_H);
 
-  // ── Header (28px) ── region name, styled like .region-header ────────────
+  // ── Header (46px) — two-line: destination + vantage description ────────
   ctx.fillStyle = t.bg2;
   ctx.fillRect(0, 0, RM_W, RM_HDR);
   // header bottom border
@@ -639,12 +639,19 @@ function renderRegionMeter(params) {
   ctx.lineWidth   = 1;
   ctx.beginPath(); ctx.moveTo(0, RM_HDR - 0.5); ctx.lineTo(RM_W, RM_HDR - 0.5); ctx.stroke();
 
-  // "FROM → TO" in accent, bold, centered
+  // Line 1: destination region name — bold accent 12px
   ctx.fillStyle    = t.accent;
   ctx.font         = 'bold 12px "DejaVu Sans Mono"';
   ctx.textAlign    = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(`${fromLabel} → ${toLabel}`, RM_W / 2, RM_HDR / 2, RM_W - 8);
+  ctx.fillText(toLabel, RM_W / 2, 13, RM_W - 8);
+
+  // Line 2: vantage description — dimmer, 9px
+  ctx.fillStyle    = t.text;
+  ctx.font         = '9px "DejaVu Sans Mono"';
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(vantageDesc, RM_W / 2, 32, RM_W - 8);
 
   // ── Band rows (10 × 26px) ────────────────────────────────────────────────
   const bandRowsY = RM_HDR;
@@ -697,7 +704,7 @@ function renderRegionMeter(params) {
 }
 
 // ── Render warming/no-data region meter ──────────────────────────────────────
-function renderRegionMeterWarmup(theme, msg = 'Warming up… retry in ~30s') {
+function renderRegionMeterWarmup(theme, vantageDesc = '', msg = 'Warming up… retry in ~30s') {
   const t      = THEMES[theme] || THEMES.dark;
   const canvas = createCanvas(RM_W, RM_H);
   const ctx    = canvas.getContext('2d');
@@ -719,6 +726,11 @@ function renderRegionMeterWarmup(theme, msg = 'Warming up… retry in ~30s') {
 
   ctx.fillStyle = t.textDim; ctx.font = '9px "DejaVu Sans Mono"';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle    = t.textDim;
+  ctx.font         = '9px "DejaVu Sans Mono"';
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+  if (vantageDesc) ctx.fillText(vantageDesc, RM_W / 2, 32, RM_W - 8);
   ctx.fillText(msg, RM_W / 2, RM_HDR + (BANDS.length * RM_ROW) / 2);
 
   const brdY = RM_HDR + BANDS.length * RM_ROW + RM_FTR;
@@ -1149,8 +1161,11 @@ const server = http.createServer(async (req, res) => {
     return acc;
   }, { rbn: 0, ftx: 0 });
 
+  const vantageDesc = queryCtx.mode === 'region'
+    ? `Signals heard from ${fromLabel}`
+    : `Within ${queryCtx.radiusMiles} mi of ${(q.grid || '').toUpperCase()}`;
   const png = renderRegionMeter({
-    allResults, fromLabel, toLabel, theme, dataAge,
+    allResults, fromLabel, toLabel, vantageDesc, theme, dataAge,
     rbnCount: totals.rbn, ftxCount: totals.ftx,
   });
   pngCache.set(cacheKey, { png, createdAt: now });
