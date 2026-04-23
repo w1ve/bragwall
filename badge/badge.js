@@ -1162,7 +1162,7 @@ const server = http.createServer(async (req, res) => {
   }, { rbn: 0, ftx: 0 });
 
   const vantageDesc = queryCtx.mode === 'region'
-    ? `Signals heard from ${fromLabel}`
+    ? `Signals heard in ${fromLabel}`
     : `Within ${queryCtx.radiusMiles} mi of ${(q.grid || '').toUpperCase()}`;
   const png = renderRegionMeter({
     allResults, fromLabel, toLabel, vantageDesc, theme, dataAge,
