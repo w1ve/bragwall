@@ -765,9 +765,10 @@ function drawBandRow(ctx, y, bandLabel, result, t) {
   const modeH  = RM_MODE_H - 1;     // usable height
   const nSlots = DISPLAY_MODE_SLOTS.length;   // 4
 
-  // Evenly divide the full width among 4 chips
-  const chipW   = Math.floor((W - RM_PAD * 2) / nSlots);
-  const chipGap = Math.floor(((W - RM_PAD * 2) - chipW * nSlots) / (nSlots - 1));
+  // Fixed chip widths per label: "CW"=22, "SSB"=26, "RY"=22, "DIG"=26
+  // Gap = 3px between chips; row is left-aligned starting at RM_PAD
+  const CHIP_WIDTHS = [22, 26, 22, 26];
+  const CHIP_GAP    = 3;
   const chipH   = modeH - 2;        // 1px top+bottom margin
   const chipY   = modeY + 1;
 
@@ -775,7 +776,8 @@ function drawBandRow(ctx, y, bandLabel, result, t) {
     const slot   = DISPLAY_MODE_SLOTS[si];
     const isSSB  = slot.label === 'SSB';
     const active = slot.test(modeSet) && hasData;
-    const chipX  = RM_PAD + si * (chipW + chipGap);
+    const chipW  = CHIP_WIDTHS[si];
+    const chipX  = RM_PAD + CHIP_WIDTHS.slice(0, si).reduce((a, w) => a + w + CHIP_GAP, 0);
     const qSnr   = modeQuality?.[slot.qKey] ?? null;
 
     if (active) {
