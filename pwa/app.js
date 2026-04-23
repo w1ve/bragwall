@@ -2588,7 +2588,7 @@ const HISTORY_SNR_MAX  = 60;
 const HISTORY_WINDOW_S = 24 * 60 * 60;
 
 // SVG margins
-const HM = { top: 8, right: 8, bottom: 28, left: 32 };
+const HM = { top: 10, right: 10, bottom: 52, left: 34 };
 
 let historyRefreshTimer  = null;
 let historyLastVantage   = null; // last vantage key fetched — skip redundant fetches
@@ -2703,7 +2703,7 @@ function drawHistoryChart(svg, note, data) {
     const hh = String(d.getUTCHours()).padStart(2, '0');
     const mm = String(d.getUTCMinutes()).padStart(2, '0');
     const lbl = makeSvgEl('text', {
-      x, y: pt + ch + 13, 'text-anchor': 'middle', class: 'history-tick-label'
+      x, y: pt + ch + 14, 'text-anchor': 'middle', class: 'history-tick-label'
     });
     lbl.textContent = `${hh}:${mm}`;
     svg.appendChild(lbl);
@@ -2745,17 +2745,22 @@ function drawHistoryChart(svg, note, data) {
   }
 
   // ── Legend ────────────────────────────────────────────────────────────────
-  const legendY    = pt + ch + 18;
-  const itemW      = 38;
+  const legendY    = pt + ch + 20;
+  const itemW      = 44;
   const maxPerRow  = Math.max(1, Math.floor(cw / itemW));
+  const totalRows  = Math.ceil(HISTORY_BANDS.length / maxPerRow);
+  const rowH       = 15;
+  // Centre the legend block horizontally
+  const legendBlockW = Math.min(HISTORY_BANDS.length, maxPerRow) * itemW;
+  const legendOffX   = Math.max(0, Math.floor((cw - legendBlockW) / 2));
 
   for (let i = 0; i < HISTORY_BANDS.length; i++) {
     const band  = HISTORY_BANDS[i];
     const color = HISTORY_BAND_COLORS[i];
     const col   = i % maxPerRow;
     const row   = Math.floor(i / maxPerRow);
-    const lx    = pl + col * itemW;
-    const ly    = legendY + row * 11;
+    const lx    = pl + legendOffX + col * itemW;
+    const ly    = legendY + row * rowH;
     const hasData = byBand[band].length >= 2;
 
     svg.appendChild(makeSvgEl('rect', {
