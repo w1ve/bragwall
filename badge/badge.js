@@ -1332,12 +1332,26 @@ const server = http.createServer(async (req, res) => {
     sendPng(res, cached.png, now - cached.createdAt, false); return;
   }
 
-  // Fetch data
-  const data        = await getRbnData();
-  const pskSnapshot = await getPskData();
-  const dataAge     = Math.round((now - rbnFetchedAt) / 1000);
+  // Fetch data — block and wait up to 25s for first data (better than returning a warmup image)
+  let data        = await getRbnData();
+  let pskSnapshot = await getPskData();
 
   if (!data) {
+    // First request after cold start: poll until data arrives or timeout
+    const WAIT_MS    = 25000;
+    const POLL_MS    = 1000;
+    const deadline   = Date.now() + WAIT_MS;
+    while (!data && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, POLL_MS));
+      data        = await getRbnData();
+      pskSnapshot = await getPskData();
+    }
+  }
+
+  const dataAge = Math.round((now - rbnFetchedAt) / 1000);
+
+  if (!data) {
+    // Truly failed after waiting — return warmup image as last resort
     const png = useLegacy
       ? renderLegacyWarmup(theme, legacySize)
       : renderRegionMeterWarmup(theme);
