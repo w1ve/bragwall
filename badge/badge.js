@@ -85,6 +85,8 @@ const REGION_ALIASES = {
 };
 
 // ── Themes — matches PWA CSS variables ───────────────────────────────────────
+// segLive: 15-entry array matching buildThemeMeterPalette() in app.js
+// quality: 4-entry [low, med, hi, peak] matching DEFAULT_MODE_QUALITY_COLORS scaled per theme
 const THEMES = {
   dark: {
     bg:       '#0d0d1a',
@@ -100,10 +102,22 @@ const THEMES = {
     orange:   '#ff8c00',
     red:      '#dc1e1e',
     dimSeg:   '#1c1c32',
-    modeX:    '#7a2020',
-    // branding bar
     brandBg:  '#0a0a14',
     brandFg:  '#00d4aa',
+    // Segment colors (live bar) — matches buildThemeMeterPalette()
+    segLive: ['#00d250','#00d250','#00d250','#00d250','#00d250','#00d250','#00d250','#00d250','#00d250',
+              '#e6c800','#e6c800','#e6c800','#ff8c00','#dc1e1e','#dc1e1e'],
+    // Quality track colors [frac<0.60, frac<0.80, frac<0.90, frac>=0.90]
+    quality:  ['#00d250','#e6c800','#ff8c00','#dc1e1e'],
+    // Mode chip colors — from style.css .mode-active / .mode-ssb / .mode-absent / .mode-dim
+    modeActiveBg:     '#006e3a',
+    modeActiveBorder: '#00ff99',
+    modeSsbBg:        '#7a5500',
+    modeSsbBorder:    '#ffd000',
+    modeAbsentColor:  '#ff6666',
+    modeAbsentBorder: '#442222',
+    modeDimColor:     '#334466',
+    modeDimBorder:    '#222233',
   },
   light: {
     bg:       '#f4f7fb',
@@ -119,11 +133,21 @@ const THEMES = {
     orange:   '#884400',
     red:      '#880010',
     dimSeg:   '#e2e8f0',
-    modeX:    '#cc3333',
     brandBg:  '#e8f0ec',
     brandFg:  '#006650',
+    segLive: ['#008830','#008830','#008830','#008830','#008830','#008830','#008830','#008830','#008830',
+              '#886600','#886600','#886600','#884400','#880010','#880010'],
+    quality:  ['#008830','#886600','#884400','#880010'],
+    modeActiveBg:     '#006e3a',
+    modeActiveBorder: '#00aa55',
+    modeSsbBg:        '#7a5500',
+    modeSsbBorder:    '#cc9900',
+    modeAbsentColor:  '#cc3333',
+    modeAbsentBorder: '#883333',
+    modeDimColor:     '#8a94a8',
+    modeDimBorder:    '#c8d0dc',
   },
-  cr: {
+  cb: {
     bg:       '#0f1222',
     bg2:      '#151a31',
     bg3:      '#1b2140',
@@ -137,11 +161,25 @@ const THEMES = {
     orange:   '#ff9f1a',
     red:      '#d94fb2',
     dimSeg:   '#1f2750',
-    modeX:    '#8f2065',
     brandBg:  '#0a0e1a',
     brandFg:  '#4fd7ff',
+    segLive: ['#39b8ff','#39b8ff','#39b8ff','#39b8ff','#39b8ff','#39b8ff','#39b8ff','#39b8ff','#39b8ff',
+              '#f6d84a','#f6d84a','#f6d84a','#ff9f1a','#d94fb2','#d94fb2'],
+    quality:  ['#39b8ff','#f6d84a','#ff9f1a','#d94fb2'],
+    // CB theme overrides from style.css
+    modeActiveBg:     '#11578d',
+    modeActiveBorder: '#67c8ff',
+    modeSsbBg:        '#7c5a0b',
+    modeSsbBorder:    '#ffd44f',
+    modeAbsentColor:  '#d94fb2',
+    modeAbsentBorder: '#5a1f4a',
+    modeDimColor:     '#b5c6de',
+    modeDimBorder:    '#6f85a8',
   },
+  // legacy alias
+  cr: null,
 };
+THEMES.cr = THEMES.cb;  // backward-compat alias
 
 // ── History chart band colors — matches app.js exactly ───────────────────────
 const HIST_BAND_COLORS = [
@@ -606,10 +644,34 @@ function computeGridBand(data, grid, radiusMiles, toKey, bandLabel) {
 
 // ── Seg bar color (matches PWA) ───────────────────────────────────────────────
 function segColor(i, t) {
+  // Use per-theme segLive array if available (matches buildThemeMeterPalette in app.js)
+  if (t.segLive) return t.segLive[Math.min(i, t.segLive.length - 1)];
+  // Fallback for any theme missing segLive
   const frac = (i + 1) / RM_SEG;
   if (frac < 0.60) return t.green;
   if (frac < 0.80) return t.yellow;
+  if (frac < 0.87) return t.orange || t.red;
   return t.red;
+}
+
+// Quality color for a given SNR fraction — matches qualityColorForSnr in app.js
+function qualityColor(frac, t) {
+  const q = t.quality || ['#00d250','#e6c800','#ff8c00','#dc1e1e'];
+  if (frac < 0.60) return q[0];
+  if (frac < 0.80) return q[1];
+  if (frac < 0.90) return q[2];
+  return q[3];
+}
+
+// Quality fraction for a mode SNR — matches qualityFractionForMode in app.js
+function qualityFrac(qKey, snrVal) {
+  if (snrVal == null || isNaN(snrVal)) return 0;
+  if (qKey === 'FTx') {
+    // PSK: map -20..+20 dB → 0..1
+    return Math.max(0, Math.min((snrVal - (-20)) / 40, 1));
+  }
+  // CW/RTTY/SSB: same 0..MAX_SNR scale as main meter
+  return Math.max(0, Math.min(snrVal / MAX_SNR, 1));
 }
 
 // ── Draw one band row ─────────────────────────────────────────────────────────
@@ -621,20 +683,29 @@ const DISPLAY_MODE_SLOTS = [
   { label: 'DIG', test: m => m.has('FT8'),  qKey: 'FTx'  },
 ];
 
-// Draw a mini 3-segment S-meter strip inside a mode chip (same concept as main UI)
-function drawMiniSmeter(ctx, x, y, w, h, snrVal, t) {
-  const MINI_SEGS = 3;
-  const gap = 1;
-  const segW = Math.floor((w - gap * (MINI_SEGS - 1)) / MINI_SEGS);
-  if (segW < 1) return;
-  const frac = snrVal != null ? Math.min(Math.max(snrVal / MAX_SNR, 0), 1) : 0;
-  const lit  = Math.round(frac * MINI_SEGS);
-  for (let i = 0; i < MINI_SEGS; i++) {
-    const sx = x + i * (segW + gap);
-    // Active segments use segColor scaled to position; inactive are darker
-    ctx.fillStyle = i < lit ? segColor(Math.floor(i * RM_SEG / MINI_SEGS), t)
-                             : 'rgba(0,0,0,0.30)';
-    ctx.fillRect(sx, y, segW, h);
+// Draw a mini quality-track inside a mode chip — matches .mode-quality-track in style.css
+// Uses qualityColor (not segColor) — same 4-color quality palette as app.js
+function drawMiniSmeter(ctx, x, y, w, h, qKey, snrVal, t) {
+  const SEGS = 4;  // matches 4 .mode-quality-seg elements in buildQualityTrack()
+  const gap  = 1;
+  const segW = Math.max(1, Math.floor((w - gap * (SEGS - 1)) / SEGS));
+  const frac = qualityFrac(qKey, snrVal);
+  // Background track
+  ctx.fillStyle = t.dimSeg;
+  ctx.fillRect(x, y, w, h);
+  for (let i = 0; i < SEGS; i++) {
+    const sx     = x + i * (segW + gap);
+    const start  = i / SEGS;
+    const end    = (i + 1) / SEGS;
+    let fill = 0;
+    if (frac > 0) {
+      if (frac >= end) fill = 1;
+      else if (frac > start) fill = (frac - start) * SEGS;
+    }
+    if (fill > 0) {
+      ctx.fillStyle = qualityColor(frac, t);
+      ctx.fillRect(sx, y, Math.round(segW * fill), h);
+    }
   }
 }
 
@@ -701,38 +772,52 @@ function drawBandRow(ctx, y, bandLabel, result, t) {
   const chipY   = modeY + 1;
 
   for (let si = 0; si < nSlots; si++) {
-    const slot    = DISPLAY_MODE_SLOTS[si];
-    const active  = slot.test(modeSet) && hasData;
-    const chipX   = RM_PAD + si * (chipW + chipGap);
-    const qSnr    = modeQuality?.[slot.qKey] ?? null;
+    const slot   = DISPLAY_MODE_SLOTS[si];
+    const isSSB  = slot.label === 'SSB';
+    const active = slot.test(modeSet) && hasData;
+    const chipX  = RM_PAD + si * (chipW + chipGap);
+    const qSnr   = modeQuality?.[slot.qKey] ?? null;
 
     if (active) {
-      // Active: green background fill
-      ctx.fillStyle = t.green;
+      // ── Active chip — matches .mode-active / .mode-ssb in style.css ────
+      const bgColor     = isSSB ? t.modeSsbBg     : t.modeActiveBg;
+      const borderColor = isSSB ? t.modeSsbBorder  : t.modeActiveBorder;
+      ctx.fillStyle = bgColor;
       ctx.fillRect(chipX, chipY, chipW, chipH);
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth   = 1;
+      ctx.strokeRect(chipX + 0.5, chipY + 0.5, chipW - 1, chipH - 1);
 
-      // Mini 3-segment S-meter strip — bottom 3px of chip
+      // Mini quality-track strip — top 3px of chip (matches .mode-quality-track top:1px)
       const meterH = 3;
-      const meterY = chipY + chipH - meterH;
+      const meterY = chipY + 1;
       const meterX = chipX + 1;
       const meterW = chipW - 2;
-      drawMiniSmeter(ctx, meterX, meterY, meterW, meterH, qSnr, t);
+      drawMiniSmeter(ctx, meterX, meterY, meterW, meterH, slot.qKey, qSnr, t);
 
-      // Label text — white, not bold
+      // Label — white, not bold, centered below the quality track
       ctx.fillStyle    = '#ffffff';
       ctx.font         = `9px "DejaVu Sans Mono"`;
       ctx.textAlign    = 'center';
       ctx.textBaseline = 'middle';
-      // Center in upper portion of chip (above meter strip)
-      ctx.fillText(slot.label, chipX + chipW / 2, chipY + (chipH - meterH) / 2);
-    } else {
-      // Inactive: dim border only, no fill
-      ctx.strokeStyle = `rgba(${hexToRgb(t.border)},0.35)`;
+      const textY = chipY + meterH + 1 + (chipH - meterH - 1) / 2;
+      ctx.fillText(slot.label, chipX + chipW / 2, textY);
+    } else if (!hasData) {
+      // ── No data — .mode-dim ─────────────────────────────────────────────
+      ctx.strokeStyle = t.modeDimBorder;
       ctx.lineWidth   = 0.75;
       ctx.strokeRect(chipX + 0.5, chipY + 0.5, chipW - 1, chipH - 1);
-
-      // Label text — dim, not bold
-      ctx.fillStyle    = t.textDim;
+      ctx.fillStyle    = t.modeDimColor;
+      ctx.font         = `9px "DejaVu Sans Mono"`;
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(slot.label, chipX + chipW / 2, chipY + chipH / 2);
+    } else {
+      // ── Absent (has data but mode not heard) — .mode-absent ─────────────
+      ctx.strokeStyle = t.modeAbsentBorder;
+      ctx.lineWidth   = 0.75;
+      ctx.strokeRect(chipX + 0.5, chipY + 0.5, chipW - 1, chipH - 1);
+      ctx.fillStyle    = t.modeAbsentColor;
       ctx.font         = `9px "DejaVu Sans Mono"`;
       ctx.textAlign    = 'center';
       ctx.textBaseline = 'middle';
