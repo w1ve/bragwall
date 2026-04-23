@@ -34,6 +34,9 @@ services:
       - "3002"
     environment:
       - PORT=3002
+      - RBN_PROXY_URL=http://rbn-smeter:80/rbn
+      - PSK_PROXY_URL=http://rbn-smeter:80/psk
+      - HIST_PROXY_URL=http://rbn-smeter:80/history
     networks:
       - rbn-net
 
