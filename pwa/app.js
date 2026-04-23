@@ -2745,7 +2745,7 @@ function drawHistoryChart(svg, note, data) {
   }
 
   // ── Legend ────────────────────────────────────────────────────────────────
-  const legendY    = pt + ch + 20;
+  const legendY    = pt + ch + 30;
   const itemW      = 44;
   const maxPerRow  = Math.max(1, Math.floor(cw / itemW));
   const totalRows  = Math.ceil(HISTORY_BANDS.length / maxPerRow);
