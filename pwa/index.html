@@ -96,44 +96,48 @@
   </div>
 
   <div class="desktop-main">
-    <div id="sw-bar">
-      <div class="sw-item"><span class="sw-lbl">SFI</span><span class="sw-val" id="sw-sfi">—</span></div>
-      <div class="sw-item"><span class="sw-lbl">SSN</span><span class="sw-val" id="sw-ssn">—</span></div>
-      <div class="sw-item"><span class="sw-lbl">A-Index</span><span class="sw-val" id="sw-a">—</span></div>
-      <div class="sw-item"><span class="sw-lbl">K-Index</span><span class="sw-val" id="sw-k">—</span></div>
-      <div class="sw-item"><span class="sw-lbl">Solar Wind</span><span class="sw-val" id="sw-wind">—</span></div>
-      <div class="sw-item"><span class="sw-lbl">Bz</span><span class="sw-val" id="sw-bz">—</span></div>
-      <div class="sw-item"><span class="sw-lbl">UTC</span><span class="sw-val sw-utc" id="sw-utc">00:00:00</span></div>
-    </div>
 
-    <div class="vantage-display">
-      <div class="vantage-display-label">Vantage Point:</div>
-      <div class="vantage-display-value" id="vantage-point-text">E. North America</div>
-      <div class="vantage-place-name" id="vantage-place-name" style="display:none"></div>
-      <canvas id="vantage-map-canvas" class="vantage-map-canvas" aria-label="Vantage map"></canvas>
-      <div class="vantage-skimmer-wrap">
-        <span id="vantage-skimmer-label" class="skimmer-count skimmer-none vantage-count-label">0 skimmers</span>
-        <span class="vantage-count-sep"> / </span>
-        <span id="vantage-ftx-label" class="skimmer-count skimmer-none vantage-count-label">0 Digital reports</span>
-        <span id="skimmer-count" class="sr-only">0 skimmers / 0 Digital reports</span>
-      </div>
-      <div class="vantage-audio-wrap">
-        <button type="button" id="vantage-audio-btn" class="vantage-audio-btn" aria-label="Play propagation audio report" title="Audio Radio Conditions Report (updated every 15 minutes)">
-          <svg class="audio-btn-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <!-- Speaker icon -->
-            <g class="icon-speaker">
-              <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
-            </g>
-            <!-- Spinner ring (hidden unless .loading) -->
-            <circle class="icon-spinner-ring" cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="42 14"/>
-          </svg>
-          <!-- Countdown overlay (shown during .loading) -->
-          <span class="audio-countdown" id="audio-countdown" aria-hidden="true"></span>
-        </button>
-        <audio id="vantage-audio-player" preload="none"></audio>
+    <!-- ── Left column: Solar + Vantage stacked ── -->
+    <div class="left-col">
+      <div id="sw-bar">
+        <div class="sw-item"><span class="sw-lbl">SFI</span><span class="sw-val" id="sw-sfi">—</span></div>
+        <div class="sw-item"><span class="sw-lbl">SSN</span><span class="sw-val" id="sw-ssn">—</span></div>
+        <div class="sw-item"><span class="sw-lbl">A-Index</span><span class="sw-val" id="sw-a">—</span></div>
+        <div class="sw-item"><span class="sw-lbl">K-Index</span><span class="sw-val" id="sw-k">—</span></div>
+        <div class="sw-item"><span class="sw-lbl">Solar Wind</span><span class="sw-val" id="sw-wind">—</span></div>
+        <div class="sw-item"><span class="sw-lbl">Bz</span><span class="sw-val" id="sw-bz">—</span></div>
+        <div class="sw-item"><span class="sw-lbl">UTC</span><span class="sw-val sw-utc" id="sw-utc">00:00:00</span></div>
       </div>
 
-      <!-- ── Signal History Chart ── -->
+      <div class="vantage-display">
+        <div class="vantage-display-label">Vantage Point:</div>
+        <div class="vantage-display-value" id="vantage-point-text">E. North America</div>
+        <div class="vantage-place-name" id="vantage-place-name" style="display:none"></div>
+        <canvas id="vantage-map-canvas" class="vantage-map-canvas" aria-label="Vantage map"></canvas>
+        <div class="vantage-skimmer-wrap">
+          <span id="vantage-skimmer-label" class="skimmer-count skimmer-none vantage-count-label">0 skimmers</span>
+          <span class="vantage-count-sep"> / </span>
+          <span id="vantage-ftx-label" class="skimmer-count skimmer-none vantage-count-label">0 Digital reports</span>
+          <span id="skimmer-count" class="sr-only">0 skimmers / 0 Digital reports</span>
+        </div>
+        <div class="vantage-audio-wrap">
+          <button type="button" id="vantage-audio-btn" class="vantage-audio-btn" aria-label="Play propagation audio report" title="Audio Radio Conditions Report (updated every 15 minutes)">
+            <svg class="audio-btn-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <!-- Speaker icon -->
+              <g class="icon-speaker">
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+              </g>
+              <!-- Spinner ring (hidden unless .loading) -->
+              <circle class="icon-spinner-ring" cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="42 14"/>
+            </svg>
+            <!-- Countdown overlay (shown during .loading) -->
+            <span class="audio-countdown" id="audio-countdown" aria-hidden="true"></span>
+          </button>
+          <audio id="vantage-audio-player" preload="none"></audio>
+        </div>
+      </div>
+
+      <!-- ── Signal History Chart (own panel, same width as left-col) ── -->
       <div class="history-panel" id="history-panel">
         <div class="history-header">
           <span class="history-title">24h Signal History — All Bands</span>

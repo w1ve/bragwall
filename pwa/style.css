@@ -497,8 +497,9 @@ body.theme-cb .theme-btn.active {
   border-right: 1px solid rgba(0,212,170,0.15);
   padding: 8px 12px 9px;
   text-align: center;
-  width: 390px;
-  min-width: 390px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   align-self: stretch;
   display: flex;
   flex-direction: column;
@@ -682,28 +683,40 @@ body.theme-cb .vantage-audio-btn.playing {
   padding: 8px 8px 0;
 }
 
-/* ── Space-weather strip (left vertical rail on desktop) ─────────── */
-#sw-bar {
+/* ── Left column: solar strip + vantage + history stacked ── */
+.left-col {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
   gap: 8px;
-  width: 182px;
+  flex-shrink: 0;
+  width: 390px;
+  min-width: 260px;
+}
+
+/* ── Space-weather strip (horizontal top of left-col) ─────────── */
+#sw-bar {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+  width: 100%;
   flex-shrink: 0;
   border: 1px solid rgba(0,212,170,0.25);
   border-radius: 4px;
   background: rgba(13,13,26,0.35);
-  padding: 9px 8px;
-  align-self: stretch;
-  justify-content: center;
+  padding: 7px 10px;
+  box-sizing: border-box;
   overflow: hidden;
 }
 
 .sw-item {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: flex-start;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .sw-lbl {
@@ -750,6 +763,7 @@ body.theme-cb .vantage-audio-btn.playing {
   .vantage-audio-btn { font-size: 16px; width: 30px; height: 30px; }
   .vantage-map-canvas { height: 120px; margin-top: 6px; }
   .desktop-main { display: block; padding: 0 10px; }
+  .left-col { width: auto; min-width: 0; }
   #sw-bar {
     width: auto;
     margin-left: 0;
@@ -760,6 +774,7 @@ body.theme-cb .vantage-audio-btn.playing {
     flex-direction: row;
     flex-wrap: wrap;
     align-items: center;
+    justify-content: flex-start;
   }
   .sw-item { justify-content: flex-start; align-items: center; }
   .sw-val {
@@ -1209,7 +1224,7 @@ body::after {
 
 /* ── Signal History Chart ──────────────────────────────────────────────────── */
 .history-panel {
-  margin-top: 10px;
+  margin-top: 0;
   border: 1px solid rgba(0,212,170,0.25);
   border-radius: 4px;
   background: rgba(13,13,26,0.45);
@@ -1240,7 +1255,7 @@ body::after {
 .history-svg {
   display: block;
   width: 100%;
-  height: 185px;
+  height: 200px;
   overflow: visible;
 }
 
@@ -1260,7 +1275,7 @@ body::after {
 .history-grid-line  { stroke: var(--text); stroke-width: 0.5; stroke-dasharray: 2 4; opacity: 0.2; }
 .history-legend-text { fill: var(--text); font-size: 11px; font-family: 'Share Tech Mono', monospace; }
 
-/* Vantage display: force column layout so chart sits below audio button */
+/* Vantage display: column layout */
 .vantage-display {
   justify-content: flex-start;
 }
