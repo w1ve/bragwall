@@ -1746,7 +1746,8 @@ async function resolveAsyncVoiceId() {
   return asyncVoiceLookupPromise;
 }
 
-async function streamAsyncTtsToFile(transcript, lang, outPath) {
+async function streamAsyncTtsToFile(transcript, lang, outPath, httpRes = null) {
+  if (!ASYNC_API_KEY) throw new Error('ASYNC_API_KEY not configured');
   const voiceId = await resolveAsyncVoiceId();
   const ttsLang = outputLanguage(lang);
   const payload = {
@@ -1765,7 +1766,8 @@ async function streamAsyncTtsToFile(transcript, lang, outPath) {
   const parsed = url.parse(targetUrl);
   const bodyText = JSON.stringify(payload);
   const tmpPath = `${outPath}.tmp-${Date.now()}`;
-  const ws = fs.createWriteStream(tmpPath);
+  const fileStream = fs.createWriteStream(tmpPath);
+
   await new Promise((resolve, reject) => {
     const req = https.request(
       {
@@ -1774,7 +1776,7 @@ async function streamAsyncTtsToFile(transcript, lang, outPath) {
         port: parsed.port,
         path: parsed.path,
         method: 'POST',
-        timeout: 30000,
+        timeout: 45000,
         headers: {
           'x-api-key': ASYNC_API_KEY,
           'version': ASYNC_API_VERSION,
@@ -1787,23 +1789,35 @@ async function streamAsyncTtsToFile(transcript, lang, outPath) {
           const chunks = [];
           upstream.on('data', (c) => chunks.push(c));
           upstream.on('end', () => {
-            ws.destroy();
+            fileStream.destroy();
             fs.promises.unlink(tmpPath).catch(() => {});
             reject(new Error(`tts_${upstream.statusCode}:${Buffer.concat(chunks).toString('utf8').slice(0, 300)}`));
           });
           return;
         }
-        upstream.pipe(ws);
+        // Tee: forward each chunk to the HTTP client immediately while writing to file
+        upstream.on('data', (chunk) => {
+          fileStream.write(chunk);
+          if (httpRes && !httpRes.writableEnded) {
+            httpRes.write(chunk);
+          }
+        });
+        upstream.on('end', () => { fileStream.end(); });
+        upstream.on('error', (e) => {
+          fileStream.destroy();
+          fs.promises.unlink(tmpPath).catch(() => {});
+          reject(e);
+        });
       }
     );
     req.on('timeout', () => { req.destroy(); });
     req.on('error', (e) => {
-      ws.destroy();
+      fileStream.destroy();
       fs.promises.unlink(tmpPath).catch(() => {});
       reject(e);
     });
-    ws.on('finish', resolve);
-    ws.on('error', (e) => {
+    fileStream.on('finish', resolve);
+    fileStream.on('error', (e) => {
       fs.promises.unlink(tmpPath).catch(() => {});
       reject(e);
     });
@@ -1917,10 +1931,10 @@ async function serveAudioPropReport(req, res, query = {}) {
 
   await ensureAudioCacheDir();
 
-  // --- CACHE CHECK (before any expensive work) ---
-  const keyHash = hashText(stableAudioParamKey(params));
-  const bucket  = bucketForNow(AUDIO_CACHE_MS);
-  const prefix  = `${keyHash}-`;
+  // ── Cache check ────────────────────────────────────────────────────────────
+  const keyHash  = hashText(stableAudioParamKey(params));
+  const bucket   = bucketForNow(AUDIO_CACHE_MS);
+  const prefix   = `${keyHash}-`;
   const fileName = `${prefix}${bucket}.mp3`;
   const outPath  = path.join(AUDIO_CACHE_DIR, fileName);
 
@@ -1932,7 +1946,7 @@ async function serveAudioPropReport(req, res, query = {}) {
       return;
     }
   } catch {}
-  // --- END CACHE CHECK ---
+  // ── Cache miss: stream directly to client while saving to file ────────────
 
   await ensurePskForAudio();
   if (params.mode === 'grid' && params.grid) {
@@ -1940,39 +1954,70 @@ async function serveAudioPropReport(req, res, query = {}) {
     params.gridPlaceName = geo.spoken;
   }
   const regionResults = await collectBandResultsPerRegion(params);
-  const solar = await fetchSolarDataForAudio();
-  const sourceStats = countSourceStats(params);
-  const englishText = buildAudioReportText(params, regionResults, solar, sourceStats);
+  const solar         = await fetchSolarDataForAudio();
+  const sourceStats   = countSourceStats(params);
+  const englishText   = buildAudioReportText(params, regionResults, solar, sourceStats);
   const translatedText = await translateTextIfNeeded(englishText, params.lang);
-  const transcript = translatedText && translatedText.trim() ? translatedText : englishText;
+  const transcript    = translatedText && translatedText.trim() ? translatedText : englishText;
 
   try {
     await deleteMatchingAudio(prefix);
-    // Generate the dynamic portion first
-    const dynamicPath = `${outPath}.dynamic-tmp`;
-    await streamAsyncTtsToFile(transcript, params.lang, dynamicPath);
 
-    // Stitch static outro (English only — skip for translated reports)
-    let finalPath = dynamicPath;
+    // Start streaming headers before we begin TTS — client can start buffering immediately
+    res.writeHead(200, {
+      ...CORS,
+      'Content-Type': 'audio/mpeg',
+      'Transfer-Encoding': 'chunked',
+      'Cache-Control': 'no-store',
+      'X-HFSIGNALS-Audio': 'streaming',
+      'X-HFSIGNALS-Language': outputLanguage(params.lang),
+      'X-HFSIGNALS-Tooltip': audioTooltipText(params.lang),
+      'Access-Control-Expose-Headers': 'X-HFSIGNALS-Audio, X-HFSIGNALS-Language, X-HFSIGNALS-Tooltip',
+    });
+
+    const dynamicPath = `${outPath}.dynamic-tmp`;
+
+    // Stream TTS to client and file simultaneously
+    await streamAsyncTtsToFile(transcript, params.lang, dynamicPath, res);
+
+    // Stitch static outro (English only) — do this after client has received all dynamic audio
     if (params.lang === 'en' || !params.lang) {
       try {
         await ensureOutroAudio();
-        await concatMp3Files(dynamicPath, OUTRO_AUDIO_PATH, outPath);
-        await fs.promises.unlink(dynamicPath).catch(() => {});
-        finalPath = outPath;
-      } catch (stitchErr) {
-        console.warn('[audio] outro stitch failed, serving dynamic only:', stitchErr?.message);
-        await fs.promises.rename(dynamicPath, outPath).catch(() => {});
-        finalPath = outPath;
+        // Stream the outro file to client, then save final stitched file to cache
+        await new Promise((resolve, reject) => {
+          const rs = fs.createReadStream(OUTRO_AUDIO_PATH);
+          rs.on('data', (chunk) => {
+            if (!res.writableEnded) res.write(chunk);
+          });
+          rs.on('end', resolve);
+          rs.on('error', reject);
+        });
+        // Stitch to cache file in background — client already has all audio
+        concatMp3Files(dynamicPath, OUTRO_AUDIO_PATH, outPath)
+          .then(() => fs.promises.unlink(dynamicPath).catch(() => {}))
+          .catch((e) => {
+            console.warn('[audio] outro cache stitch failed:', e?.message);
+            // Fall back: just rename dynamic as the cached file
+            fs.promises.rename(dynamicPath, outPath).catch(() => {});
+          });
+      } catch (outroErr) {
+        console.warn('[audio] outro stream failed:', outroErr?.message);
+        // Rename dynamic file as cached even without outro
+        fs.promises.rename(dynamicPath, outPath).catch(() => {});
       }
     } else {
-      await fs.promises.rename(dynamicPath, outPath).catch(() => {});
+      fs.promises.rename(dynamicPath, outPath).catch(() => {});
     }
 
-    sendAudioFile(res, finalPath, true, params.lang);
+    if (!res.writableEnded) res.end();
   } catch (e) {
     console.error('[audio] generation failed:', e?.message || e);
-    sendJson(res, 502, { error: 'audio_generation_failed', reason: String(e?.message || e || 'unknown') });
+    if (!res.headersSent) {
+      sendJson(res, 502, { error: 'audio_generation_failed', reason: String(e?.message || e || 'unknown') });
+    } else if (!res.writableEnded) {
+      res.end();
+    }
   }
 }
 

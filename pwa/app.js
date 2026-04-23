@@ -2023,6 +2023,7 @@ function stopAudioPlayback() {
     try { URL.revokeObjectURL(audioPlayback.url); } catch {}
   }
   audioPlayback = null;
+  audioRequestInFlight = false;
   const btn = document.getElementById('vantage-audio-btn');
   if (btn) {
     btn.classList.remove('playing');
@@ -2033,40 +2034,17 @@ function stopAudioPlayback() {
   }
 }
 
-// ── Audio countdown timer ──────────────────────────────────────────────────
-let _countdownTimer = null;
-
-function startCountdown(seconds) {
-  stopCountdown();
-  const el = document.getElementById('audio-countdown');
-  if (!el) return;
-  let remaining = seconds;
-  el.textContent = remaining;
-  _countdownTimer = setInterval(() => {
-    remaining = Math.max(0, remaining - 1);
-    el.textContent = remaining;
-    if (remaining <= 0) stopCountdown();
-  }, 1000);
-}
-
-function stopCountdown() {
-  if (_countdownTimer) { clearInterval(_countdownTimer); _countdownTimer = null; }
-  const el = document.getElementById('audio-countdown');
-  if (el) el.textContent = '';
-}
 
 function setAudioButtonState(state) {
   const btn = document.getElementById('vantage-audio-btn');
   if (!btn) return;
   btn.classList.remove('playing', 'loading');
-  stopCountdown(); // always clear countdown when state changes
   if (state === 'loading') {
     btn.classList.add('loading');
-    startCountdown(30); // 30-second countdown
     btn.disabled = true;
     btn.setAttribute('aria-pressed', 'false');
-    btn.setAttribute('aria-label', 'Generating audio propagation report');
-    btn.title = 'Generating audio propagation report...';
+    btn.setAttribute('aria-label', 'Buffering audio report');
+    btn.title = 'Buffering audio report...';
     return;
   }
   if (state === 'playing') {
@@ -2097,91 +2075,46 @@ async function requestAudioReport() {
     setStatus('Enter a valid grid square before requesting audio report.', 'error');
     return;
   }
+
   audioRequestInFlight = true;
   setAudioButtonState('loading');
   suppressAudioStopOnVantageUpdate = true;
-  setStatus('Generating audio propagation report...', 'warn');
-  const ctrl = new AbortController();
-  audioAbortCtrl = ctrl;
+  setStatus('Loading audio propagation report...', 'warn');
 
-  // Track waiting audio so we can stop it once the report arrives
-  let waitingAudio = null;
-  let waitingObjectUrl = null;
+  const audio = new Audio(url);
+  audioElement = audio;
 
-  // Kick off the real report fetch immediately
-  const reportFetchPromise = fetch(url, { signal: ctrl.signal });
+  // As soon as the browser has enough data to start playback, flip to "playing"
+  audio.addEventListener('canplay', () => {
+    if (audioRequestInFlight) {
+      audioRequestInFlight = false;
+      setAudioButtonState('playing');
+      setStatus('Playing audio propagation report.', 'ok');
+    }
+  }, { once: true });
 
-  // Play waiting audio only if the server is generating (not a cache hit).
-  // We race the report fetch against a short timer — if the report resolves
-  // first it was a cache hit and we skip the waiting message entirely.
-  const CACHE_HIT_GRACE_MS = 600; // ms before we assume it's not cached
-  let waitingAudioStarted = false;
-  const waitingTimer = setTimeout(async () => {
-    // Still waiting after grace period — go ahead and play the waiting message
-    waitingAudioStarted = true;
-    try {
-      const r = await fetch('/audio/waiting');
-      if (!r.ok) return;
-      const blob = await r.blob();
-      if (audioAbortCtrl !== ctrl) return; // user already cancelled
-      waitingObjectUrl = URL.createObjectURL(blob);
-      waitingAudio = new Audio(waitingObjectUrl);
-      audioElement = waitingAudio;
-      waitingAudio.play().catch(() => {});
-    } catch {}
-  }, CACHE_HIT_GRACE_MS);
+  audio.addEventListener('ended', () => {
+    stopAudioPlayback();
+    setStatus('Audio report completed.', 'ok');
+  });
+
+  audio.addEventListener('error', () => {
+    audioRequestInFlight = false;
+    suppressAudioStopOnVantageUpdate = false;
+    stopAudioPlayback();
+    setStatus('Audio report failed.', 'error');
+  });
 
   try {
-    // Await the real report response
-    const resp = await reportFetchPromise;
-    if (!resp.ok) {
-      let details = '';
-      try {
-        const body = await resp.json();
-        details = body?.reason || body?.error || '';
-      } catch {}
-      throw new Error(`HTTP ${resp.status}${details ? ` (${details})` : ''}`);
-    }
-    const blob = await resp.blob();
-    const objectUrl = URL.createObjectURL(blob);
-
-    // Report resolved — cancel waiting timer and stop any waiting audio
-    clearTimeout(waitingTimer);
-    if (waitingAudio) {
-      try { waitingAudio.pause(); waitingAudio.src = ''; } catch {}
-      if (waitingObjectUrl) { URL.revokeObjectURL(waitingObjectUrl); waitingObjectUrl = null; }
-      waitingAudio = null;
-    }
-
-    const audio = new Audio(objectUrl);
-    audioPlayback = { url: objectUrl };
-    audioElement = audio;
-    setAudioButtonState('playing');
-    audio.addEventListener('ended', () => {
-      stopAudioPlayback();
-      setStatus('Audio report completed.', 'ok');
-    });
-    audio.addEventListener('error', () => {
-      stopAudioPlayback();
-      setStatus('Audio playback failed.', 'error');
-    });
     await audio.play();
-    setStatus('Playing audio propagation report.', 'ok');
+    audioPlayback = { url: null }; // streaming — no object URL to revoke
   } catch (e) {
-    clearTimeout(waitingTimer);
-    if (waitingAudio) {
-      try { waitingAudio.pause(); waitingAudio.src = ''; } catch {}
-      if (waitingObjectUrl) { URL.revokeObjectURL(waitingObjectUrl); waitingObjectUrl = null; }
-    }
+    audioRequestInFlight = false;
+    suppressAudioStopOnVantageUpdate = false;
     if (e?.name !== 'AbortError') {
       setStatus(`Audio report failed: ${e.message || 'unknown error'}`, 'error');
     }
     stopAudioPlayback();
-  } finally {
-    suppressAudioStopOnVantageUpdate = false;
-    audioRequestInFlight = false;
-    if (!audioPlayback && (!audioElement || audioElement.paused)) setAudioButtonState('idle');
-    audioAbortCtrl = null;
   }
 }
 
