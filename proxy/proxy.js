@@ -2160,11 +2160,23 @@ async function serveAudioPropReport(req, res, query = {}) {
     console.log('[audio] cache miss — streaming live TTS:', fileName);
     const dynamicPath = `${outPath}.dynamic-tmp`;
 
-    // Stream TTS to client and file simultaneously
-    await streamAsyncTtsToFile(transcript, params.lang, dynamicPath, res);
+    // Stream TTS to client and file simultaneously.
+    // Some translated scripts can be rejected by upstream TTS even when
+    // translation succeeded; in that case, retry once in English so the API
+    // returns audio instead of failing the request.
+    let usedEnglishTtsFallback = false;
+    try {
+      await streamAsyncTtsToFile(transcript, params.lang, dynamicPath, res);
+    } catch (ttsErr) {
+      const canFallbackToEnglish = transcript !== englishText && outputLanguage(params.lang) !== 'en';
+      if (!canFallbackToEnglish) throw ttsErr;
+      console.warn('[audio] translated-script TTS failed; retrying English fallback:', ttsErr?.message || ttsErr);
+      await streamAsyncTtsToFile(englishText, 'en', dynamicPath, res);
+      usedEnglishTtsFallback = true;
+    }
 
     // Stitch static outro (English only) — do this after client has received all dynamic audio
-    if (params.lang === 'en' || !params.lang) {
+    if (params.lang === 'en' || !params.lang || usedEnglishTtsFallback) {
       try {
         await ensureOutroAudio();
         // Stream the outro file to client, then save final stitched file to cache
