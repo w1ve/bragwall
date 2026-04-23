@@ -1235,6 +1235,11 @@ const server = http.createServer(async (req, res) => {
   const pathname = parsed.pathname.replace(/\/+$/, '');
   const q        = parsed.query;
 
+  // Debug — log every badge request with theme resolution
+  if (pathname.startsWith('/badge') || pathname.startsWith('/hfsignals')) {
+    console.log(`[badge-req] ${pathname} | raw theme="${q.theme}" | parsed="${parseTheme(q.theme)}" | url=${req.url}`);
+  }
+
   // ── Health ───────────────────────────────────────────────────────────────
   if (pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
