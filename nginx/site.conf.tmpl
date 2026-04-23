@@ -129,6 +129,12 @@ server {
         add_header Access-Control-Allow-Origin "*";
     }
 
+    # ── API docs page ───────────────────────────────────────────────────────
+    location = /api {
+        alias /usr/share/nginx/html/api.html;
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+    }
+
     # ── Service worker + app shell — never HTTP-cached ──────────────────────
     location ~* ^/(sw\.js|app\.js|style\.css|index\.html|manifest\.json)$ {
         add_header Cache-Control "no-cache, no-store, must-revalidate";

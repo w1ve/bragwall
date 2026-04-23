@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0d0d1a">
+  <title>HFSIGNALS.LIVE — API Docs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0d1a;
+      --bg2:       #1a1a2e;
+      --bg3:       #12122a;
+      --accent:    #00d4aa;
+      --accent2:   #00af8a;
+      --text:      #c8d0e8;
+      --text-dim:  #6a7490;
+      --text-hdr:  #00d4aa;
+      --border:    #00d4aa;
+      --dimmed:    #1c1c32;
+      --code-bg:   #0a0a18;
+    }
+    body.theme-light {
+      --bg:        #f4f7fb;
+      --bg2:       #ffffff;
+      --bg3:       #eef3f8;
+      --accent:    #00886a;
+      --accent2:   #00745a;
+      --text:      #1a1a2e;
+      --text-dim:  #5f6f8c;
+      --text-hdr:  #00745a;
+      --border:    #00886a;
+      --dimmed:    #e2e8f0;
+      --code-bg:   #e4eaf5;
+    }
+    body.theme-cb {
+      --bg:        #0f1222;
+      --bg2:       #151a31;
+      --bg3:       #1b2140;
+      --accent:    #4fd7ff;
+      --accent2:   #3bc3ea;
+      --text:      #e8f3ff;
+      --text-dim:  #9fb0c9;
+      --text-hdr:  #4fd7ff;
+      --border:    #4fd7ff;
+      --dimmed:    #1f2750;
+      --code-bg:   #0b0f20;
+    }
+
+    html, body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--bg2);
+      border-bottom: 1px solid var(--accent);
+      padding: 10px 20px 9px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .title-block h1 {
+      font-family: 'Orbitron', monospace;
+      font-size: clamp(15px, 3.5vw, 21px);
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 0.08em;
+      line-height: 1;
+    }
+    .title-block .subtitle {
+      font-size: 9px;
+      color: var(--text-dim);
+      letter-spacing: 0.18em;
+      margin-top: 3px;
+    }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .nav-home {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      color: var(--accent);
+      text-decoration: none;
+      border: 1px solid rgba(0,212,170,0.35);
+      border-radius: 4px;
+      padding: 5px 10px;
+      transition: background 0.15s;
+    }
+    .nav-home:hover { background: rgba(0,212,170,0.10); }
+    .theme-controls { display: inline-flex; align-items: center; gap: 6px; }
+    .theme-btn {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 5px 9px;
+      border-radius: 4px;
+      border: 1px solid rgba(0,212,170,0.35);
+      color: var(--text);
+      background: var(--bg3);
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .theme-btn:hover { border-color: var(--accent); background: rgba(0,212,170,0.10); }
+    .theme-btn.active { color: #fff; background: var(--accent2); border-color: var(--accent); }
+    body.theme-cb .theme-btn.active { color: #0b1126; }
+
+    /* ── Layout ── */
+    .page-wrap {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 36px 20px 60px;
+    }
+
+    /* ── Hero intro ── */
+    .hero {
+      background: var(--bg2);
+      border: 1px solid rgba(0,212,170,0.25);
+      border-radius: 6px;
+      padding: 28px 28px 24px;
+      margin-bottom: 40px;
+    }
+    .hero h2 {
+      font-family: 'Orbitron', monospace;
+      font-size: clamp(14px, 3vw, 18px);
+      color: var(--accent);
+      letter-spacing: 0.06em;
+      margin-bottom: 14px;
+    }
+    .hero p { color: var(--text); margin-bottom: 10px; }
+    .hero p:last-child { margin-bottom: 0; }
+    .hero .highlight { color: var(--accent); font-weight: bold; }
+
+    /* ── Section headings ── */
+    .section { margin-bottom: 48px; }
+    .section-title {
+      font-family: 'Orbitron', monospace;
+      font-size: clamp(13px, 2.5vw, 16px);
+      color: var(--accent);
+      letter-spacing: 0.08em;
+      border-bottom: 1px solid rgba(0,212,170,0.30);
+      padding-bottom: 8px;
+      margin-bottom: 20px;
+    }
+    .subsection { margin-bottom: 32px; }
+    .subsection-title {
+      font-size: 13px;
+      color: var(--accent);
+      margin-bottom: 10px;
+      letter-spacing: 0.05em;
+    }
+
+    /* ── Endpoint card ── */
+    .endpoint-card {
+      background: var(--bg2);
+      border: 1px solid rgba(0,212,170,0.20);
+      border-radius: 6px;
+      padding: 20px 22px;
+      margin-bottom: 24px;
+    }
+    .endpoint-method {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: bold;
+      background: var(--accent2);
+      color: #fff;
+      border-radius: 3px;
+      padding: 2px 7px;
+      margin-right: 10px;
+      letter-spacing: 0.05em;
+    }
+    .endpoint-path {
+      font-size: 15px;
+      color: var(--accent);
+      letter-spacing: 0.03em;
+    }
+    .endpoint-desc {
+      color: var(--text-dim);
+      font-size: 12px;
+      margin-top: 8px;
+      margin-bottom: 14px;
+      line-height: 1.5;
+    }
+    .endpoint-desc strong { color: var(--text); }
+
+    /* ── Param table ── */
+    .param-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 12px; }
+    .param-table th {
+      text-align: left;
+      color: var(--text-dim);
+      border-bottom: 1px solid rgba(0,212,170,0.15);
+      padding: 4px 10px 6px 0;
+      font-weight: normal;
+      letter-spacing: 0.05em;
+    }
+    .param-table td {
+      padding: 5px 10px 5px 0;
+      vertical-align: top;
+      border-bottom: 1px solid rgba(0,212,170,0.06);
+      color: var(--text);
+    }
+    .param-table td:first-child { color: var(--accent); white-space: nowrap; }
+    .param-table td:nth-child(2) { color: var(--text-dim); white-space: nowrap; padding-right: 16px; }
+    .param-table tr:last-child td { border-bottom: none; }
+    .required { color: #ff8888 !important; font-size: 10px; margin-left: 3px; }
+    .optional { color: var(--text-dim) !important; font-size: 10px; margin-left: 3px; }
+
+    /* ── Code blocks ── */
+    .code-block {
+      background: var(--code-bg);
+      border: 1px solid rgba(0,212,170,0.15);
+      border-radius: 4px;
+      padding: 12px 14px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      color: var(--text);
+      overflow-x: auto;
+      white-space: pre;
+      margin-top: 10px;
+    }
+    .code-comment { color: var(--text-dim); }
+    .code-url { color: var(--accent); }
+
+    /* ── Live example area ── */
+    .live-section {
+      background: var(--bg3);
+      border: 1px solid rgba(0,212,170,0.18);
+      border-radius: 6px;
+      padding: 18px 20px;
+      margin-top: 14px;
+    }
+    .live-title {
+      font-size: 11px;
+      color: var(--text-dim);
+      letter-spacing: 0.1em;
+      margin-bottom: 12px;
+    }
+    .live-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .live-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .live-label {
+      font-size: 10px;
+      color: var(--text-dim);
+      text-align: center;
+    }
+    .live-item img {
+      display: block;
+      max-width: 100%;
+      border: 1px solid rgba(0,212,170,0.15);
+      border-radius: 3px;
+    }
+    .live-url-row {
+      margin-top: 10px;
+      font-size: 11px;
+      color: var(--text-dim);
+      word-break: break-all;
+    }
+    .live-url-row a { color: var(--accent); text-decoration: none; }
+    .live-url-row a:hover { text-decoration: underline; }
+
+    /* ── Embed code snippet ── */
+    .embed-example {
+      margin-top: 14px;
+    }
+    .embed-label {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+      letter-spacing: 0.08em;
+    }
+
+    /* ── Audio player ── */
+    .audio-player-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .audio-url-entry {
+      background: var(--bg2);
+      border: 1px solid rgba(0,212,170,0.15);
+      border-radius: 4px;
+      padding: 10px 14px;
+    }
+    .audio-url-entry .alabel {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+    }
+    .audio-url-entry audio {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+    .audio-url-entry .aurl {
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-top: 5px;
+      word-break: break-all;
+    }
+    .audio-url-entry .aurl a { color: var(--accent); text-decoration: none; }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid rgba(0,212,170,0.20);
+      padding: 24px 20px;
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 11px;
+      line-height: 1.8;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    /* ── Responsive ── */
+    @media (max-width: 600px) {
+      .page-wrap { padding: 20px 14px 48px; }
+      .hero { padding: 18px 16px; }
+      .endpoint-card { padding: 14px 14px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="title-block">
+    <h1>HFSIGNALS.LIVE</h1>
+    <p class="subtitle">DEVELOPER API</p>
+  </div>
+  <div class="header-right">
+    <a href="/" class="nav-home">← Live App</a>
+    <div class="theme-controls" role="group" aria-label="Theme">
+      <button type="button" id="theme-dark" class="theme-btn">Dark</button>
+      <button type="button" id="theme-light" class="theme-btn">Light</button>
+      <button type="button" id="theme-cb" class="theme-btn">CB</button>
+    </div>
+  </div>
+</header>
+
+<div class="page-wrap">
+
+  <!-- ── Hero ── -->
+  <div class="hero">
+    <h2>EMBED REAL-TIME HF PROPAGATION IN YOUR SITE</h2>
+    <p>
+      <span class="highlight">HFSIGNALS.LIVE</span> provides two public APIs that let you bring
+      live HF propagation data directly into your own web pages, blog posts, club sites, or
+      amateur radio dashboards — no API key required.
+    </p>
+    <p>
+      The <span class="highlight">Badge API</span> returns a self-contained PNG image updated
+      every 60 seconds. Drop it into any <code>&lt;img&gt;</code> tag — it works in HTML pages,
+      forum signatures, Markdown READMEs, Discord servers, even email clients that render images.
+    </p>
+    <p>
+      The <span class="highlight">Audio Report API</span> returns an MP3 file: a spoken
+      propagation briefing generated from live RBN and PSKReporter data, complete with solar
+      conditions. Stream it, embed it in a player, or pipe it to your shack speaker for
+      a hands-free band check.
+    </p>
+    <p style="color:var(--text-dim); font-size:12px;">
+      All endpoints are served over HTTPS. Images are cached for 60&nbsp;s server-side.
+      Audio reports are cached until underlying data changes. Please be courteous — don't
+      poll faster than once per minute.
+    </p>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       BADGE API
+  ══════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-title">BADGE API — PNG SIGNAL METER</div>
+
+    <p style="margin-bottom:20px; color:var(--text-dim); font-size:12px;">
+      Returns a PNG image showing per-band SNR levels across 10 HF bands.
+      The badge updates automatically in the browser because the server sets
+      <code>Cache-Control: public, max-age=60</code> — refresh the page and
+      the image will pull fresh data within a minute.
+    </p>
+
+    <!-- Region endpoint -->
+    <div class="endpoint-card">
+      <div>
+        <span class="endpoint-method">GET</span>
+        <span class="endpoint-path">/badge/region</span>
+      </div>
+      <div class="endpoint-desc">
+        Shows signal levels <strong>received within a named world region</strong>
+        as heard from another region. Great for a "how well can I hear Europe right now?" widget.
+      </div>
+      <table class="param-table">
+        <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+        <tr>
+          <td>from<span class="required">*</span></td>
+          <td>string</td>
+          <td>Origin region code — where signals are transmitted from. See region list below.</td>
+        </tr>
+        <tr>
+          <td>to<span class="required">*</span></td>
+          <td>string</td>
+          <td>Destination region code — where signals are heard.</td>
+        </tr>
+        <tr>
+          <td>theme<span class="optional">opt</span></td>
+          <td>dark&nbsp;|&nbsp;light&nbsp;|&nbsp;cb</td>
+          <td>Visual theme. Default: <code>dark</code>. <code>cb</code> = colorblind-safe palette.</td>
+        </tr>
+        <tr>
+          <td>size<span class="optional">opt</span></td>
+          <td>sm&nbsp;|&nbsp;md&nbsp;|&nbsp;lg</td>
+          <td>Badge width: <code>sm</code>=200px, <code>md</code>=260px (default), <code>lg</code>=320px.</td>
+        </tr>
+      </table>
+
+      <div class="live-section">
+        <div class="live-title">▶ LIVE EXAMPLES — E.N.AMERICA → E.N.AMERICA, ALL SIZES</div>
+        <div class="live-grid">
+          <div class="live-item">
+            <img src="/badge/region?from=E.N.America&to=E.N.America&theme=dark&size=sm" alt="sm" loading="lazy">
+            <div class="live-label">size=sm (200px)<br>dark theme</div>
+          </div>
+          <div class="live-item">
+            <img src="/badge/region?from=E.N.America&to=E.N.America&theme=dark&size=md" alt="md" loading="lazy">
+            <div class="live-label">size=md (260px)<br>dark theme</div>
+          </div>
+          <div class="live-item">
+            <img src="/badge/region?from=E.N.America&to=E.N.America&theme=dark&size=lg" alt="lg" loading="lazy">
+            <div class="live-label">size=lg (320px)<br>dark theme</div>
+          </div>
+        </div>
+        <div class="live-grid" style="margin-top:14px;">
+          <div class="live-item">
+            <img src="/badge/region?from=E.N.America&to=E.N.America&theme=light&size=md" alt="light" loading="lazy">
+            <div class="live-label">size=md · light</div>
+          </div>
+          <div class="live-item">
+            <img src="/badge/region?from=E.N.America&to=E.N.America&theme=cb&size=md" alt="cb" loading="lazy">
+            <div class="live-label">size=md · cb</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="embed-example">
+        <div class="embed-label">HTML EMBED</div>
+        <div class="code-block"><span class="code-comment">&lt;!-- Drop this anywhere in your page --&gt;</span>
+&lt;img src="<span class="code-url">https://hfsignals.live/badge/region?from=E.N.America&amp;to=E.N.America&amp;theme=dark</span>"
+     alt="HF Propagation — E.N.America"
+     style="border-radius:4px;"&gt;</div>
+      </div>
+
+      <div class="embed-example">
+        <div class="embed-label">MARKDOWN (GitHub / README)</div>
+        <div class="code-block">![HF Propagation](https://hfsignals.live/badge/region?from=E.N.America&to=E.N.America&theme=dark)</div>
+      </div>
+    </div>
+
+    <!-- Grid endpoint -->
+    <div class="endpoint-card">
+      <div>
+        <span class="endpoint-method">GET</span>
+        <span class="endpoint-path">/badge/grid</span>
+      </div>
+      <div class="endpoint-desc">
+        Shows signal levels heard <strong>within a radius of a Maidenhead grid square</strong>.
+        Perfect for displaying propagation at your exact QTH — just enter your grid locator.
+      </div>
+      <table class="param-table">
+        <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+        <tr>
+          <td>grid<span class="required">*</span></td>
+          <td>string</td>
+          <td>4- or 6-character Maidenhead grid locator (e.g. <code>FN30</code>, <code>FN30at</code>).</td>
+        </tr>
+        <tr>
+          <td>radius<span class="optional">opt</span></td>
+          <td>number</td>
+          <td>Radius in miles. Default: 500. Practical range: 100–2000.</td>
+        </tr>
+        <tr>
+          <td>theme<span class="optional">opt</span></td>
+          <td>dark&nbsp;|&nbsp;light&nbsp;|&nbsp;cb</td>
+          <td>Visual theme. Default: <code>dark</code>.</td>
+        </tr>
+        <tr>
+          <td>size<span class="optional">opt</span></td>
+          <td>sm&nbsp;|&nbsp;md&nbsp;|&nbsp;lg</td>
+          <td>Badge width. Default: <code>md</code>.</td>
+        </tr>
+      </table>
+
+      <div class="live-section">
+        <div class="live-title">▶ LIVE EXAMPLES — FN30, 500 mi radius, ALL SIZES</div>
+        <div class="live-grid">
+          <div class="live-item">
+            <img src="/badge/grid?grid=FN30&radius=500&theme=dark&size=sm" alt="sm" loading="lazy">
+            <div class="live-label">size=sm</div>
+          </div>
+          <div class="live-item">
+            <img src="/badge/grid?grid=FN30&radius=500&theme=dark&size=md" alt="md" loading="lazy">
+            <div class="live-label">size=md (default)</div>
+          </div>
+          <div class="live-item">
+            <img src="/badge/grid?grid=FN30&radius=500&theme=dark&size=lg" alt="lg" loading="lazy">
+            <div class="live-label">size=lg</div>
+          </div>
+        </div>
+        <div class="live-grid" style="margin-top:14px;">
+          <div class="live-item">
+            <img src="/badge/grid?grid=FN30&radius=500&theme=light&size=md" alt="light" loading="lazy">
+            <div class="live-label">light theme</div>
+          </div>
+          <div class="live-item">
+            <img src="/badge/grid?grid=FN30&radius=500&theme=cb&size=md" alt="cb" loading="lazy">
+            <div class="live-label">cb theme</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="embed-example">
+        <div class="embed-label">HTML EMBED — YOUR QTH</div>
+        <div class="code-block">&lt;img src="<span class="code-url">https://hfsignals.live/badge/grid?grid=FN30&amp;radius=500&amp;theme=dark</span>"
+     alt="HF Propagation at FN30"&gt;</div>
+      </div>
+    </div>
+
+    <!-- Region codes reference -->
+    <div class="subsection">
+      <div class="subsection-title">AVAILABLE REGION CODES</div>
+      <table class="param-table">
+        <tr><th>Code</th><th>Description</th></tr>
+        <tr><td>E.N.America</td><td>Eastern North America</td></tr>
+        <tr><td>W.N.America</td><td>Western North America</td></tr>
+        <tr><td>Europe</td><td>Europe</td></tr>
+        <tr><td>Asia</td><td>Asia</td></tr>
+        <tr><td>Oceania</td><td>Oceania / Pacific</td></tr>
+        <tr><td>S.America</td><td>South America</td></tr>
+        <tr><td>Africa</td><td>Africa</td></tr>
+        <tr><td>Mid.East</td><td>Middle East</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       AUDIO API
+  ══════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-title">AUDIO REPORT API — SPOKEN PROPAGATION BRIEFING</div>
+
+    <p style="margin-bottom:20px; color:var(--text-dim); font-size:12px;">
+      Returns an MP3 audio file — a synthesized voice report covering current band conditions,
+      active digital and CW modes, solar flux index, K-index, and geomagnetic conditions.
+      Reports are generated fresh when data changes, then cached. Typical length: 30–60 seconds.
+    </p>
+
+    <!-- Region audio -->
+    <div class="endpoint-card">
+      <div>
+        <span class="endpoint-method">GET</span>
+        <span class="endpoint-path">/audio/region</span>
+      </div>
+      <div class="endpoint-desc">
+        Spoken report for a region-to-region path. Includes per-band SNR summary,
+        active modes (CW, FT8, FT4, SSB), solar conditions, and attribution.
+        <strong>Embed an &lt;audio&gt; element</strong> directly — it streams from the server.
+      </div>
+      <table class="param-table">
+        <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+        <tr>
+          <td>from<span class="required">*</span></td>
+          <td>string</td>
+          <td>Origin region (see region list above).</td>
+        </tr>
+        <tr>
+          <td>to<span class="required">*</span></td>
+          <td>string</td>
+          <td>Destination region.</td>
+        </tr>
+        <tr>
+          <td>modes<span class="optional">opt</span></td>
+          <td>string</td>
+          <td>Comma-separated mode list: <code>cw</code>, <code>ft8</code>, <code>ft4</code>, <code>rtty</code>. Default: all.</td>
+        </tr>
+      </table>
+
+      <div class="live-section">
+        <div class="live-title">▶ LIVE AUDIO — E.N.AMERICA → E.N.AMERICA</div>
+        <div class="audio-player-wrap">
+          <div class="audio-url-entry">
+            <div class="alabel">Region report: E.N.America → E.N.America (all modes)</div>
+            <audio controls preload="none"
+              src="/audio/region?from=E.N.America&to=E.N.America">
+              Your browser does not support the audio element.
+            </audio>
+            <div class="aurl">
+              <a href="/audio/region?from=E.N.America&to=E.N.America" target="_blank">
+                /audio/region?from=E.N.America&amp;to=E.N.America
+              </a>
+            </div>
+          </div>
+          <div class="audio-url-entry">
+            <div class="alabel">Region report: E.N.America → E.N.America (CW + FT8 only)</div>
+            <audio controls preload="none"
+              src="/audio/region?from=E.N.America&to=E.N.America&modes=cw,ft8">
+              Your browser does not support the audio element.
+            </audio>
+            <div class="aurl">
+              <a href="/audio/region?from=E.N.America&to=E.N.America&modes=cw,ft8" target="_blank">
+                /audio/region?from=E.N.America&amp;to=E.N.America&amp;modes=cw,ft8
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="embed-example">
+        <div class="embed-label">HTML EMBED — INLINE AUDIO PLAYER</div>
+        <div class="code-block">&lt;audio controls
+  src="<span class="code-url">https://hfsignals.live/audio/region?from=E.N.America&amp;to=E.N.America</span>"&gt;
+&lt;/audio&gt;</div>
+      </div>
+    </div>
+
+    <!-- Grid audio -->
+    <div class="endpoint-card">
+      <div>
+        <span class="endpoint-method">GET</span>
+        <span class="endpoint-path">/audio/grid</span>
+      </div>
+      <div class="endpoint-desc">
+        Spoken report for signals heard within a radius of a grid square.
+        Ideal for a "what's the band doing at my QTH?" audio widget.
+      </div>
+      <table class="param-table">
+        <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+        <tr>
+          <td>grid<span class="required">*</span></td>
+          <td>string</td>
+          <td>4- or 6-character Maidenhead grid locator.</td>
+        </tr>
+        <tr>
+          <td>radius<span class="optional">opt</span></td>
+          <td>number</td>
+          <td>Radius in miles. Default: 500.</td>
+        </tr>
+        <tr>
+          <td>modes<span class="optional">opt</span></td>
+          <td>string</td>
+          <td>Mode filter, same as above. Default: all.</td>
+        </tr>
+      </table>
+
+      <div class="live-section">
+        <div class="live-title">▶ LIVE AUDIO — FN30, 500 MI RADIUS</div>
+        <div class="audio-player-wrap">
+          <div class="audio-url-entry">
+            <div class="alabel">Grid report: FN30 within 500 miles (all modes)</div>
+            <audio controls preload="none"
+              src="/audio/grid?grid=FN30&radius=500">
+              Your browser does not support the audio element.
+            </audio>
+            <div class="aurl">
+              <a href="/audio/grid?grid=FN30&radius=500" target="_blank">
+                /audio/grid?grid=FN30&amp;radius=500
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="embed-example">
+        <div class="embed-label">HTML EMBED</div>
+        <div class="code-block">&lt;audio controls
+  src="<span class="code-url">https://hfsignals.live/audio/grid?grid=FN30&amp;radius=500</span>"&gt;
+&lt;/audio&gt;</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       USE CASES
+  ══════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-title">IDEAS &amp; USE CASES</div>
+    <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:14px;">
+      <div class="endpoint-card" style="margin-bottom:0;">
+        <div style="color:var(--accent); font-size:12px; margin-bottom:6px;">📡 CLUB WEBSITE</div>
+        <div style="font-size:12px; color:var(--text-dim);">Add a live badge to your club's homepage showing current regional propagation. No login, no API key — just an img tag.</div>
+      </div>
+      <div class="endpoint-card" style="margin-bottom:0;">
+        <div style="color:var(--accent); font-size:12px; margin-bottom:6px;">🖥️ SHACK DASHBOARD</div>
+        <div style="font-size:12px; color:var(--text-dim);">Embed the audio endpoint in a Raspberry Pi dashboard. Have your shack read you the band conditions when you sit down.</div>
+      </div>
+      <div class="endpoint-card" style="margin-bottom:0;">
+        <div style="color:var(--accent); font-size:12px; margin-bottom:6px;">📝 BLOG / README</div>
+        <div style="font-size:12px; color:var(--text-dim);">Paste the Markdown snippet into a GitHub README or WordPress post. The badge auto-refreshes — always current, no maintenance.</div>
+      </div>
+      <div class="endpoint-card" style="margin-bottom:0;">
+        <div style="color:var(--accent); font-size:12px; margin-bottom:6px;">📻 NET CONTROL</div>
+        <div style="font-size:12px; color:var(--text-dim);">Trigger the audio API before a net check-in for a quick spoken band report. Pipe the URL to a TTS player or VLC for instant audio.</div>
+      </div>
+      <div class="endpoint-card" style="margin-bottom:0;">
+        <div style="color:var(--accent); font-size:12px; margin-bottom:6px;">💬 DISCORD / FORUM</div>
+        <div style="font-size:12px; color:var(--text-dim);">Paste the badge URL directly into a Discord embed or forum post. Many platforms render linked images inline and auto-refresh.</div>
+      </div>
+      <div class="endpoint-card" style="margin-bottom:0;">
+        <div style="color:var(--accent); font-size:12px; margin-bottom:6px;">📱 PWA / MOBILE APP</div>
+        <div style="font-size:12px; color:var(--text-dim);">Use the badge as a live widget in your own progressive web app, or call the audio endpoint from a mobile shortcut to speak band conditions.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       NOTES
+  ══════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-title">NOTES &amp; ATTRIBUTION</div>
+    <div style="font-size:12px; color:var(--text-dim); line-height:2;">
+      <p>Signal data is sourced from the <strong style="color:var(--text);">Reverse Beacon Network</strong> (rbn.rocks) and <strong style="color:var(--text);">PSKReporter</strong> (pskreporter.info). Solar and geomagnetic data from <strong style="color:var(--text);">NOAA Space Weather Prediction Center</strong>.</p>
+      <p style="margin-top:10px;">Badges are cached for up to 60 seconds. Audio reports are cached until underlying propagation data changes. Please do not poll faster than once per minute.</p>
+      <p style="margin-top:10px;">Questions, feedback, or custom integration requests: <strong style="color:var(--accent);">gerry[at]remote.radio</strong></p>
+    </div>
+  </div>
+
+</div><!-- /page-wrap -->
+
+<footer>
+  <div>Copyright &copy; Gerry Hull, W1VE. All Rights Reserved.</div>
+  <div style="margin-top:4px;">
+    Contact: <a href="mailto:gerry@remote.radio">gerry[at]remote.radio</a>
+    &nbsp;&middot;&nbsp;
+    <a href="/">hfsignals.live</a>
+  </div>
+</footer>
+
+<script>
+  const THEMES = ['dark', 'light', 'cb'];
+  const META_COLORS = { dark: '#0d0d1a', light: '#f4f7fb', cb: '#0f1222' };
+
+  function applyTheme(t) {
+    document.body.classList.remove('theme-dark', 'theme-light', 'theme-cb');
+    if (t !== 'dark') document.body.classList.add('theme-' + t);
+    document.querySelectorAll('.theme-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.id === 'theme-' + t);
+    });
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', META_COLORS[t] || META_COLORS.dark);
+    try { localStorage.setItem('hfsig-theme', t); } catch {}
+    // Reload live badge images with new theme param
+    document.querySelectorAll('img[src*="/badge/"]').forEach(img => {
+      const url = new URL(img.src, location.href);
+      url.searchParams.set('theme', t);
+      url.searchParams.set('_t', Date.now()); // bust cache
+      img.src = url.toString();
+    });
+  }
+
+  document.getElementById('theme-dark').addEventListener('click', () => applyTheme('dark'));
+  document.getElementById('theme-light').addEventListener('click', () => applyTheme('light'));
+  document.getElementById('theme-cb').addEventListener('click', () => applyTheme('cb'));
+
+  // Restore saved theme
+  let saved = 'dark';
+  try { saved = localStorage.getItem('hfsig-theme') || 'dark'; } catch {}
+  applyTheme(saved);
+</script>
+
+</body>
+</html>
