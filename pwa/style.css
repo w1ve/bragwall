@@ -695,28 +695,29 @@ body.theme-cb .vantage-audio-btn.playing {
 
 /* ── Space-weather strip (horizontal top of left-col) ─────────── */
 #sw-bar {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px 8px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px 8px;
   width: 100%;
   flex-shrink: 0;
   border: 1px solid rgba(0,212,170,0.25);
   border-radius: 4px;
   background: rgba(13,13,26,0.35);
-  padding: 7px 10px;
+  padding: 8px 12px;
   box-sizing: border-box;
-  overflow: hidden;
+}
+
+/* UTC (7th item) spans all 3 cols and centers itself */
+#sw-bar .sw-item:last-child {
+  grid-column: 1 / -1;
+  justify-content: center;
 }
 
 .sw-item {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 4px;
-  flex-shrink: 0;
+  justify-content: space-between;
+  gap: 6px;
 }
 
 .sw-lbl {
@@ -765,15 +766,20 @@ body.theme-cb .vantage-audio-btn.playing {
   .desktop-main { display: block; padding: 0 10px; }
   .left-col { width: auto; min-width: 0; }
   #sw-bar {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
     width: auto;
     margin-left: 0;
     border: none;
     background: transparent;
     padding: 4px 0 2px;
     gap: 5px 8px;
-    flex-direction: row;
-    flex-wrap: wrap;
     align-items: center;
+    justify-content: flex-start;
+  }
+  #sw-bar .sw-item:last-child {
+    grid-column: auto;
     justify-content: flex-start;
   }
   .sw-item { justify-content: flex-start; align-items: center; }
@@ -1209,8 +1215,8 @@ body::after {
 @media (min-width: 600px) {
   .meters-scroll {
     min-height: 260px;
-    align-items: flex-start;
-    padding: 16px 12px 8px;
+    align-items: center;
+    padding: 8px 12px;
   }
   .bar-wrap { height: 16px; }
   body { padding-bottom: 32px; }
