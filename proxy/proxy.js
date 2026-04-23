@@ -22,7 +22,7 @@ const PSK_MODES     = (process.env.PSK_MODES || 'FT8')
 const PSK_COOLDOWN_MS = parseInt(process.env.PSK_COOLDOWN_MS || String(30 * 60 * 1000), 10);
 const SSB_SNR_THRESHOLD = parseFloat(process.env.SSB_SNR_THRESHOLD || '20');
 
-const AUDIO_CACHE_MS = parseInt(process.env.AUDIO_CACHE_MS || String(15 * 60 * 1000), 10);
+const AUDIO_CACHE_MS = parseInt(process.env.AUDIO_CACHE_MS || String(30 * 60 * 1000), 10);
 const AUDIO_CACHE_DIR = process.env.AUDIO_CACHE_DIR || '/tmp/hfsignals-audio-cache';
 const WAITING_AUDIO_PATH = path.join(AUDIO_CACHE_DIR, 'waiting-message.mp3');
 const OUTRO_AUDIO_PATH   = path.join(AUDIO_CACHE_DIR, 'outro-static.mp3');
