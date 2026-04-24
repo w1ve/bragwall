@@ -18,10 +18,18 @@ USE_ARRL=1
 USE_CQWW=1
 USE_CQWPX=1
 DRY_RUN=0
+ENABLE_PROMPT=1
+
+REQUEST_DELAY_SECONDS="${REQUEST_DELAY_SECONDS:-0.8}"
+MAX_HTTP_ATTEMPTS="${MAX_HTTP_ATTEMPTS:-6}"
 
 DOWNLOADED=0
 SKIPPED=0
 FAILED=0
+REQUEST_COUNT=0
+RATE_LIMIT_RETRIES=0
+
+declare -A SEEN_CERT_KEYS=()
 
 usage() {
   cat <<EOF
@@ -39,12 +47,15 @@ Optional:
   --out-dir DIR            Output directory (default: $OUT_DIR)
   --sources LIST           Comma-separated subset: arrl,cqww,cqwpx
   --dry-run                Print planned downloads without writing files
+  --no-prompt              Disable interactive callsign prompts
   -h, --help               Show this help
 
 Notes:
   - ARRL exposes JPEG/PDF links; this script downloads JPEG and converts to PNG.
   - CQWW/CQWPX downloads are pulled from printCert.php in PNG mode.
   - Filtering is by contest year extracted from each result row.
+  - Rate-limit guard: request pacing + retries with exponential backoff.
+  - Override pacing with REQUEST_DELAY_SECONDS env var (default: 0.8).
 EOF
 }
 
@@ -66,6 +77,22 @@ trim() {
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   printf '%s' "$value"
+}
+
+wait_for_request_slot() {
+  if (( REQUEST_COUNT > 0 )); then
+    sleep "$REQUEST_DELAY_SECONDS"
+  fi
+  ((REQUEST_COUNT+=1))
+}
+
+backoff_seconds() {
+  local attempt="$1"
+  local sec=$((2 ** (attempt - 1)))
+  if (( sec > 30 )); then
+    sec=30
+  fi
+  printf '%s' "$sec"
 }
 
 sanitize_name() {
@@ -128,18 +155,69 @@ download_to_file() {
   local url="$1"
   local output="$2"
   local referer="${3:-}"
+  shift 3
+  local -a extra_args=("$@")
 
-  local curl_args=(
-    -fsSL
-    --retry 3
-    --retry-delay 1
-    -A "$USER_AGENT"
-  )
-  if [[ -n "$referer" ]]; then
-    curl_args+=(-e "$referer")
+  local attempt
+  for (( attempt=1; attempt<=MAX_HTTP_ATTEMPTS; attempt++ )); do
+    wait_for_request_slot
+
+    local curl_args=(
+      -sSL
+      --connect-timeout 20
+      --max-time 120
+      -A "$USER_AGENT"
+      -w "%{http_code}"
+      -o "$output"
+    )
+    if [[ -n "$referer" ]]; then
+      curl_args+=(-e "$referer")
+    fi
+    curl_args+=("${extra_args[@]}")
+
+    local http_code=""
+    local curl_exit=0
+    set +e
+    http_code="$(curl "${curl_args[@]}" "$url" 2>/dev/null)"
+    curl_exit=$?
+    set -e
+
+    if [[ $curl_exit -eq 0 && "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+      return 0
+    fi
+
+    local should_retry=0
+    if [[ $curl_exit -ne 0 ]]; then
+      should_retry=1
+    fi
+    case "$http_code" in
+      429|500|502|503|504) should_retry=1 ;;
+    esac
+
+    if (( should_retry == 1 )) && (( attempt < MAX_HTTP_ATTEMPTS )); then
+      local sleep_sec
+      sleep_sec="$(backoff_seconds "$attempt")"
+      ((RATE_LIMIT_RETRIES+=1))
+      warn "Retrying request (attempt ${attempt}/${MAX_HTTP_ATTEMPTS}, http=${http_code:-curl-error}) after ${sleep_sec}s: ${url}"
+      sleep "$sleep_sec"
+      continue
+    fi
+
+    rm -f "$output"
+    return 1
+  done
+
+  rm -f "$output"
+  return 1
+}
+
+mark_cert_seen() {
+  local key="$1"
+  if [[ -n "${SEEN_CERT_KEYS[$key]:-}" ]]; then
+    return 1
   fi
-
-  curl "${curl_args[@]}" "$url" -o "$output"
+  SEEN_CERT_KEYS["$key"]=1
+  return 0
 }
 
 parse_sources() {
@@ -170,6 +248,27 @@ parse_sources() {
 collect_callsigns() {
   declare -A seen=()
   local merged=()
+
+  if [[ $ENABLE_PROMPT -eq 1 && -t 0 ]]; then
+    if [[ ${#CALLS_RAW[@]} -eq 0 && -z "$CALLS_FILE" ]]; then
+      echo
+      echo "No callsigns were provided on the command line."
+      echo "Include your own call plus possible multi-op station callsigns."
+      local prompted=""
+      read -r -p "Enter callsigns (comma/space separated): " prompted
+      prompted="$(trim "$prompted")"
+      [[ -n "$prompted" ]] || die "No callsigns entered"
+      CALLS_RAW+=("$prompted")
+    else
+      local extras=""
+      echo
+      read -r -p "Optional extra possible callsigns (multi-op station calls, comma/space separated): " extras || true
+      extras="$(trim "$extras")"
+      if [[ -n "$extras" ]]; then
+        CALLS_RAW+=("$extras")
+      fi
+    fi
+  fi
 
   if [[ ${#CALLS_RAW[@]} -gt 0 ]]; then
     for chunk in "${CALLS_RAW[@]}"; do
@@ -214,8 +313,14 @@ save_arrl_pngs() {
   local query_call="$1"
   log "ARRL lookup for ${query_call}"
 
+  local arrl_html_file="${TMP_DIR}/arrl_${query_call}.html"
+  if ! download_to_file "${ARRL_URL}/certificates.php" "$arrl_html_file" "" -X POST --data-urlencode "callsign=${query_call}"; then
+    warn "ARRL lookup failed for ${query_call}"
+    ((FAILED+=1))
+    return 0
+  fi
   local html
-  html="$(curl -fsSL -A "$USER_AGENT" -X POST --data-urlencode "callsign=${query_call}" "${ARRL_URL}/certificates.php")"
+  html="$(<"$arrl_html_file")"
 
   local rows
   rows="$(printf '%s' "$html" | perl -0777 -ne 'while (/<tr[^>]*>\s*<td[^>]*>\s*([0-9]{4})[^<]*<\/td>.*?href="(certgen\.php\?mode=jpeg[^"]+)"/sg) { print "$1\t$2\n" }')"
@@ -238,7 +343,13 @@ save_arrl_pngs() {
     cert_call="${cert_call:-${query_call}}"
     id="${id:-unknown}"
 
-    local out_name="${query_call}_ARRL_${year}_${cert_call}_id${id}.png"
+    local cert_key="ARRL:${id}"
+    if ! mark_cert_seen "$cert_key"; then
+      ((SKIPPED+=1))
+      continue
+    fi
+
+    local out_name="ARRL_${year}_${cert_call}_id${id}.png"
     out_name="$(sanitize_name "$out_name")"
     local out_path="${OUT_DIR}/ARRL/${out_name}"
 
@@ -285,12 +396,17 @@ save_cq_pngs() {
 
   log "${source_name} lookup for ${query_call}"
 
-  local html
-  html="$(curl -fsSL -A "$USER_AGENT" -X POST \
+  local search_html_file="${TMP_DIR}/${source_name}_${query_call}.html"
+  if ! download_to_file "${base_url}/searchbycall.htm" "$search_html_file" "" -X POST \
     --data-urlencode "Form_Callsign=${query_call}" \
     --data "Form_SearchOps=on" \
-    --data "submit=submit" \
-    "${base_url}/searchbycall.htm")"
+    --data "submit=submit"; then
+    warn "${source_name} lookup failed for ${query_call}"
+    ((FAILED+=1))
+    return 0
+  fi
+  local html
+  html="$(<"$search_html_file")"
 
   local rows
   rows="$(printf '%s' "$html" | perl -0777 -ne "while (/<a href='\\/certificate\\/index\\.htm\\?call=([^&']+)&amp;year=([0-9]{4})&amp;mode=(cw|ph)'/sg) { print \"\$1\\t\$2\\t\$3\\n\" }" | sort -u)"
@@ -313,7 +429,13 @@ save_cq_pngs() {
       mode_token="SSB"
     fi
 
-    local out_name="${query_call}_${source_name}_${year}_${cert_call}_${mode_token}.png"
+    local cert_key="${source_name}:$(printf '%s' "$cert_call" | tr '[:lower:]' '[:upper:]'):${year}:${mode_token}"
+    if ! mark_cert_seen "$cert_key"; then
+      ((SKIPPED+=1))
+      continue
+    fi
+
+    local out_name="${source_name}_${year}_${cert_call}_${mode_token}.png"
     out_name="$(sanitize_name "$out_name")"
     local out_path="${OUT_DIR}/${source_name}/${out_name}"
 
@@ -383,6 +505,10 @@ parse_args() {
         DRY_RUN=1
         shift
         ;;
+      --no-prompt)
+        ENABLE_PROMPT=0
+        shift
+        ;;
       -h|--help)
         usage
         exit 0
@@ -431,7 +557,7 @@ main() {
     [[ $USE_CQWPX -eq 1 ]] && save_cq_pngs "CQWPX" "$CQWPX_URL" "$call"
   done
 
-  log "Done. Downloaded: ${DOWNLOADED}, Skipped: ${SKIPPED}, Failed: ${FAILED}"
+  log "Done. Downloaded: ${DOWNLOADED}, Skipped: ${SKIPPED}, Failed: ${FAILED}, Retry-events: ${RATE_LIMIT_RETRIES}"
   if [[ $FAILED -gt 0 ]]; then
     exit 2
   fi
