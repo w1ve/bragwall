@@ -22,6 +22,9 @@ ENABLE_PROMPT=1
 
 REQUEST_DELAY_SECONDS="${REQUEST_DELAY_SECONDS:-0.8}"
 MAX_HTTP_ATTEMPTS="${MAX_HTTP_ATTEMPTS:-6}"
+SOURCES_SPECIFIED=0
+OUTDIR_SPECIFIED=0
+DRYRUN_SPECIFIED=0
 
 DOWNLOADED=0
 SKIPPED=0
@@ -34,10 +37,11 @@ declare -A SEEN_CERT_KEYS=()
 usage() {
   cat <<EOF
 Usage:
-  $SCRIPT_NAME --start-date YYYY-MM-DD [options]
+  $SCRIPT_NAME [options]
 
 Required:
   --start-date DATE        Earliest date to include (year-based filtering).
+                           If omitted in interactive mode, script will prompt.
 
 Callsign input (use one or both):
   --calls LIST             Comma/space separated callsigns (example: "W1VE,K1IR")
@@ -242,6 +246,74 @@ parse_sources() {
 
   if [[ $USE_ARRL -eq 0 && $USE_CQWW -eq 0 && $USE_CQWPX -eq 0 ]]; then
     die "No valid sources selected"
+  fi
+}
+
+current_sources_csv() {
+  local parts=()
+  [[ $USE_ARRL -eq 1 ]] && parts+=("arrl")
+  [[ $USE_CQWW -eq 1 ]] && parts+=("cqww")
+  [[ $USE_CQWPX -eq 1 ]] && parts+=("cqwpx")
+  local joined=""
+  local p
+  for p in "${parts[@]}"; do
+    if [[ -z "$joined" ]]; then
+      joined="$p"
+    else
+      joined="${joined},${p}"
+    fi
+  done
+  printf '%s' "$joined"
+}
+
+prompt_for_missing_inputs() {
+  [[ $ENABLE_PROMPT -eq 1 && -t 0 ]] || return 0
+
+  if [[ -z "$START_DATE" ]]; then
+    local d=""
+    while true; do
+      read -r -p "Start date (YYYY-MM-DD): " d
+      d="$(trim "$d")"
+      if [[ -z "$d" ]]; then
+        echo "Please enter a date."
+        continue
+      fi
+      if date -d "$d" +%Y >/dev/null 2>&1; then
+        START_DATE="$d"
+        break
+      fi
+      echo "Invalid date format. Example: 2020-01-01"
+    done
+  fi
+
+  if [[ $SOURCES_SPECIFIED -eq 0 ]]; then
+    local default_sources
+    default_sources="$(current_sources_csv)"
+    local source_input=""
+    read -r -p "Sources [${default_sources}] (arrl,cqww,cqwpx): " source_input || true
+    source_input="$(trim "$source_input")"
+    if [[ -n "$source_input" ]]; then
+      parse_sources "$source_input"
+    fi
+  fi
+
+  if [[ $OUTDIR_SPECIFIED -eq 0 ]]; then
+    local out_input=""
+    read -r -p "Output directory [${OUT_DIR}]: " out_input || true
+    out_input="$(trim "$out_input")"
+    if [[ -n "$out_input" ]]; then
+      OUT_DIR="$out_input"
+    fi
+  fi
+
+  if [[ $DRYRUN_SPECIFIED -eq 0 ]]; then
+    local dry_input=""
+    read -r -p "Dry run only? [y/N]: " dry_input || true
+    dry_input="$(trim "$dry_input")"
+    dry_input="${dry_input,,}"
+    if [[ "$dry_input" == "y" || "$dry_input" == "yes" ]]; then
+      DRY_RUN=1
+    fi
   fi
 }
 
@@ -494,15 +566,18 @@ parse_args() {
       --out-dir)
         [[ $# -ge 2 ]] || die "--out-dir requires a value"
         OUT_DIR="$2"
+        OUTDIR_SPECIFIED=1
         shift 2
         ;;
       --sources)
         [[ $# -ge 2 ]] || die "--sources requires a value"
         parse_sources "$2"
+        SOURCES_SPECIFIED=1
         shift 2
         ;;
       --dry-run)
         DRY_RUN=1
+        DRYRUN_SPECIFIED=1
         shift
         ;;
       --no-prompt)
@@ -523,7 +598,8 @@ parse_args() {
 main() {
   parse_args "$@"
 
-  [[ -n "$START_DATE" ]] || die "--start-date is required"
+  prompt_for_missing_inputs
+  [[ -n "$START_DATE" ]] || die "--start-date is required (or run interactively to be prompted)"
   START_YEAR="$(date -d "$START_DATE" +%Y 2>/dev/null)" || die "Invalid --start-date: $START_DATE"
 
   collect_callsigns
