@@ -25,6 +25,9 @@ MAX_HTTP_ATTEMPTS="${MAX_HTTP_ATTEMPTS:-6}"
 SOURCES_SPECIFIED=0
 OUTDIR_SPECIFIED=0
 DRYRUN_SPECIFIED=0
+ARRL_FORMAT_SPECIFIED=0
+ARRL_FORMAT="${ARRL_FORMAT:-auto}"
+ARRL_EFFECTIVE_FORMAT=""
 
 DOWNLOADED=0
 SKIPPED=0
@@ -50,12 +53,14 @@ Callsign input (use one or both):
 Optional:
   --out-dir DIR            Output directory (default: $OUT_DIR)
   --sources LIST           Comma-separated subset: arrl,cqww,cqwpx
+  --arrl-format MODE       ARRL output: auto|png|jpeg (default: auto)
   --dry-run                Print planned downloads without writing files
   --no-prompt              Disable interactive callsign prompts
   -h, --help               Show this help
 
 Notes:
   - ARRL exposes JPEG/PDF links; this script downloads JPEG and converts to PNG.
+    If converter is unavailable and format is auto, it saves ARRL as JPEG.
   - CQWW/CQWPX downloads are pulled from printCert.php in PNG mode.
   - Filtering is by contest year extracted from each result row.
   - Rate-limit guard: request pacing + retries with exponential backoff.
@@ -155,23 +160,35 @@ is_png() {
   python3 -c 'import sys; s=open(sys.argv[1],"rb").read(8); sys.exit(0 if s==b"\x89PNG\r\n\x1a\n" else 1)' "$path"
 }
 
+is_jpeg() {
+  local path="$1"
+  python3 -c 'import sys; s=open(sys.argv[1],"rb").read(2); sys.exit(0 if s==b"\xff\xd8" else 1)' "$path"
+}
+
 download_to_file() {
   local url="$1"
   local output="$2"
-  local referer="${3:-}"
-  shift 3
+  local referer=""
+  if [[ $# -ge 3 ]]; then
+    referer="${3:-}"
+    shift 3
+  else
+    shift 2
+  fi
   local -a extra_args=("$@")
 
   local attempt
   for (( attempt=1; attempt<=MAX_HTTP_ATTEMPTS; attempt++ )); do
     wait_for_request_slot
 
+    local headers_file="${TMP_DIR}/headers_${RANDOM}_${attempt}.txt"
+
     local curl_args=(
       -sSL
       --connect-timeout 20
       --max-time 120
       -A "$USER_AGENT"
-      -w "%{http_code}"
+      -D "$headers_file"
       -o "$output"
     )
     if [[ -n "$referer" ]]; then
@@ -179,12 +196,17 @@ download_to_file() {
     fi
     curl_args+=("${extra_args[@]}")
 
-    local http_code=""
+    local http_code="000"
     local curl_exit=0
     set +e
-    http_code="$(curl "${curl_args[@]}" "$url" 2>/dev/null)"
+    curl "${curl_args[@]}" "$url" >/dev/null 2>&1
     curl_exit=$?
     set -e
+
+    if [[ -f "$headers_file" ]]; then
+      http_code="$(python3 -c 'import re, sys; d=open(sys.argv[1],"r",encoding="latin1",errors="ignore").read(); m=re.findall(r"^HTTP/[0-9.]+\s+([0-9]{3})", d, flags=re.M); print(m[-1] if m else "000")' "$headers_file")"
+      rm -f "$headers_file"
+    fi
 
     if [[ $curl_exit -eq 0 && "$http_code" =~ ^2[0-9][0-9]$ ]]; then
       return 0
@@ -315,6 +337,15 @@ prompt_for_missing_inputs() {
       DRY_RUN=1
     fi
   fi
+
+  if [[ $USE_ARRL -eq 1 && $ARRL_FORMAT_SPECIFIED -eq 0 ]]; then
+    local arrl_fmt=""
+    read -r -p "ARRL output format [auto] (auto/png/jpeg): " arrl_fmt || true
+    arrl_fmt="$(trim "$arrl_fmt")"
+    if [[ -n "$arrl_fmt" ]]; then
+      ARRL_FORMAT="$arrl_fmt"
+    fi
+  fi
 }
 
 collect_callsigns() {
@@ -421,7 +452,11 @@ save_arrl_pngs() {
       continue
     fi
 
-    local out_name="ARRL_${year}_${cert_call}_id${id}.png"
+    local out_ext="png"
+    if [[ "$ARRL_EFFECTIVE_FORMAT" == "jpeg" ]]; then
+      out_ext="jpg"
+    fi
+    local out_name="ARRL_${year}_${cert_call}_id${id}.${out_ext}"
     out_name="$(sanitize_name "$out_name")"
     local out_path="${OUT_DIR}/ARRL/${out_name}"
 
@@ -438,9 +473,20 @@ save_arrl_pngs() {
     fi
 
     local tmp_jpeg="${TMP_DIR}/arrl_${query_call}_${id}.jpg"
-    if ! download_to_file "$jpeg_url" "$tmp_jpeg"; then
+    if ! download_to_file "$jpeg_url" "$tmp_jpeg" ""; then
       warn "ARRL download failed: ${jpeg_url}"
       ((FAILED+=1))
+      continue
+    fi
+
+    if [[ "$ARRL_EFFECTIVE_FORMAT" == "jpeg" ]]; then
+      if ! is_jpeg "$tmp_jpeg"; then
+        warn "ARRL returned non-JPEG content for ${query_call} (${year})."
+        ((FAILED+=1))
+        continue
+      fi
+      mv "$tmp_jpeg" "$out_path"
+      ((DOWNLOADED+=1))
       continue
     fi
 
@@ -580,6 +626,12 @@ parse_args() {
         DRYRUN_SPECIFIED=1
         shift
         ;;
+      --arrl-format)
+        [[ $# -ge 2 ]] || die "--arrl-format requires a value"
+        ARRL_FORMAT="$2"
+        ARRL_FORMAT_SPECIFIED=1
+        shift 2
+        ;;
       --no-prompt)
         ENABLE_PROMPT=0
         shift
@@ -605,8 +657,26 @@ main() {
   collect_callsigns
 
   CONVERTER="$(detect_converter)"
-  if [[ $USE_ARRL -eq 1 && "$CONVERTER" == "none" ]]; then
-    die "ARRL selected but no JPEG->PNG converter found (need ffmpeg, magick, or convert)."
+  ARRL_FORMAT="$(printf '%s' "$ARRL_FORMAT" | tr '[:upper:]' '[:lower:]')"
+  case "$ARRL_FORMAT" in
+    auto|png|jpeg|jpg) ;;
+    *) die "Invalid --arrl-format '$ARRL_FORMAT' (valid: auto,png,jpeg)" ;;
+  esac
+
+  if [[ $USE_ARRL -eq 1 ]]; then
+    if [[ "$ARRL_FORMAT" == "auto" ]]; then
+      if [[ "$CONVERTER" == "none" ]]; then
+        ARRL_EFFECTIVE_FORMAT="jpeg"
+        warn "No converter found; ARRL will be saved as JPEG."
+      else
+        ARRL_EFFECTIVE_FORMAT="png"
+      fi
+    elif [[ "$ARRL_FORMAT" == "png" ]]; then
+      [[ "$CONVERTER" != "none" ]] || die "ARRL format png requested but no JPEG->PNG converter found (need ffmpeg, magick, or convert)."
+      ARRL_EFFECTIVE_FORMAT="png"
+    else
+      ARRL_EFFECTIVE_FORMAT="jpeg"
+    fi
   fi
 
   if [[ $DRY_RUN -eq 0 ]]; then
@@ -624,6 +694,7 @@ main() {
   log "Sources: $([[ $USE_ARRL -eq 1 ]] && printf 'ARRL ')$([[ $USE_CQWW -eq 1 ]] && printf 'CQWW ')$([[ $USE_CQWPX -eq 1 ]] && printf 'CQWPX ')"
   if [[ $USE_ARRL -eq 1 ]]; then
     log "ARRL converter: ${CONVERTER}"
+    log "ARRL output format: ${ARRL_EFFECTIVE_FORMAT}"
   fi
 
   local call
